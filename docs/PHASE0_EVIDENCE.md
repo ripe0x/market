@@ -90,6 +90,43 @@ Consequences:
 - A contract holding the NFT can be signed, so an escrow Market is viable, subject to OpenSea not blocking its address and to indexing delay after deposit.
 - Options and recommendation: `DECISIONS.md` D023.
 
+## Escrow and venue investigation (2026-10-30)
+
+Question A: will OpenSea sign offers for an independent contract that holds the NFT, and how soon after it arrives? Question B: is there meaningful bid liquidity outside OpenSea that a noncustodial Market could fill?
+
+**A1. Contract eligibility.** `npx tsx research/eligibility.ts` (in `app/`, with `OPENSEA_API_KEY`). For live criteria-0 collection offers in Milady, Pudgy Penguins, Otherdeed, BAYC, MAYC and Lil Pudgys, it asked OpenSea to sign for up to 8 contract holders per collection, head block 26306418.
+
+| Result | Count | Notes |
+| --- | --- | --- |
+| Signed, matchAdvancedOrders shape | 44 | Safe proxies, clones and custom contracts; newest created at block 26243422, about 10 hours earlier (`0x5AFe00Ea2870004f0656db5FeBa14AC9a4005AfE`) |
+| Signed, fulfillAdvancedOrder shape | 1 | OpenSea sometimes returns a direct fulfillment instead of a match |
+| `Account can not perform trading operations` | 2 | `0x6FFd7EdE62328b3Af38FCD61461Bbfc52F5651fE` (2021), `0xE9827e11ED5E27eD7Dea736D13e49cbabA0a4555` (2022). The Seaport contract gets the same answer. OpenSea publishes no rule for this |
+
+**A2. Indexing delay.**
+- `npx tsx research/indexing-recent.ts`: 20 of 20 transfers 6 to 100 minutes old were already indexed. OpenSea signed for the new owner every time and refused the previous owner every time.
+- `npx tsx research/indexing-live.ts`: it watched new ERC721 transfers in any collection with an OpenSea offer, then polled every 5 seconds. Five transfers were signed for the new owner **2 to 8 seconds** after the block. A sixth failed with `Seller cannot accept their own offers`, because the new owner was the bidder; that is unrelated to indexing.
+
+**B. Other venues.** 24 hours, blocks 26299200 to 26306400, ERC721 bids paying WETH or BETH. Measured by an independent research agent and spot-checked: over blocks 26305331 to 26306531, 612 bid fills went through the OpenSea SignedZone, 5 through the OpenSea PausableZone, and 0 were unrestricted.
+
+| Venue | Bid fills | Volume | Fills at or above 0.064 | Fillable by an independent contract? |
+| --- | --- | --- | --- | --- |
+| OpenSea SignedZone | 4,075 | 214.1 WETH | 331 | Only if the fulfiller owns the NFT (A1) |
+| Blur V2 (`0xb2ecfE4E4D61f8790bbb9DE2D1259B9e2410CEA5`) | 44 | 22.19 BETH | 32 | No: needs a Blur server signature and has no public order API |
+| Seaport, zone 0 (unrestricted) | 0 | 0 | 0 | Yes, but there is no demand |
+| LooksRare V2 | 0 (0 in about a week) | 0 | 0 | Yes, but there is no demand |
+| OpenSea PausableZone | 7 | 0.106 WETH | 0 | Negligible |
+| X2Y2 | 0 | 0 | 0 | - |
+
+Reservoir's NFT API was sunset on 2025-10-15, so it is not an order source.
+
+A flash loan cannot fix the OpenSea refusal. OpenSea checks ownership offchain, minutes before the transaction, so taking ownership mid-transaction comes too late. Zero-fee flash loans from Balancer V2 and Morpho Blue exist, but every venue that needs no offchain signature has no demand.
+
+**Conclusions.**
+- Escrow is practical. OpenSea signs for contracts that hold the NFT, including one deployed hours earlier, and sees a deposit within seconds.
+- Noncustodial matching has no meaningful liquidity source. OpenSea carries about 99% of Seaport ERC721 bids, and the only other venue with demand (Blur) is closed to independent fillers.
+- One fact cannot be proven without a mainnet deployment: whether OpenSea will accept Market's own address. 2 of 48 contracts were refused, for reasons OpenSea does not publish.
+- The escrow fill must accept either response shape from OpenSea.
+
 ## Limits
 
 - Trait offers are excluded (need proofs; criteria other than 0).
