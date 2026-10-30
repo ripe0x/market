@@ -26,6 +26,7 @@ Status labels: Baseline means recommended product direction for implementation. 
 | D020 | Baseline | Supported offers: Seaport 1.6, single WETH offer item, ERC721 item offers and criteria-0 collection offers, WETH-only fee items. Trait offers excluded | Trait offers need proofs; non-WETH items would strand value. Market enforces the WETH offer; the keeper enforces the rest. |
 | D021 | Provisional | OpenSea API key is required for matching and wallet NFT lists | Keyless responses are only served for cached URLs. Without a key the app still lists, buys, cancels and reads art from tokenURI; the footer shows matching off. |
 | D022 | Baseline | Keeper submits one transaction at a time; a stuck one is replaced by a zero-value self transfer at the same nonce | OpenSea zone signatures expire in minutes, so re-sending old calldata is pointless. Simple nonce handling and idempotent restarts. |
+| D023 | Open (2026-10-30) | Live offer matching needs the fulfiller to own the NFT when OpenSea signs | Tested with an API key: `POST /offers/fulfillment_data` returns `Item is not owned by the fulfiller` for any non-owner, so it never signs for Market under D003/D015. Contracts that own the NFT are signed (4 of 5 tested; one returned `Account can not perform trading operations`). Options: (a) escrow: seller deposits the NFT into Market, which then fills offers and direct buys from custody; reverses D003 and D011, listing becomes a transaction, Market becomes a custody target; (b) direct buy only: keep noncustodial listings, drop automatic offer matching; (c) seller-side smart account (EIP-7702) as fulfiller: complex, new trust surface. Recommendation: (a), pending owner approval. Evidence: `PHASE0_EVIDENCE.md`. Owner review required. |
 
 ## Owner Review
 
@@ -36,7 +37,7 @@ Review these after the engineering agent has selected and implemented the simple
 3. D009: One host, Next.js plus keeper, SQLite file. Recurring cost: host, RPC, free OpenSea key.
 4. D014/D017: Buyers pay ETH, sellers receive WETH, buyer overpayment returns as WETH. Confirm the WETH refund is acceptable.
 5. D016: No floor hold. Confirm, or ask for a second signed floor order.
-6. D021: Provide an OpenSea API key so the live fulfiller check in `PHASE0_EVIDENCE.md` can run.
+6. D023: **Blocking.** OpenSea signs offers only for the NFT's owner, so noncustodial matching cannot work. Choose escrow (recommended), direct buy only, or a seller smart account.
 7. Protocol fee recipient address for deployment, and who controls it.
 8. Review findings and launch blockers: `SECURITY.md`.
 

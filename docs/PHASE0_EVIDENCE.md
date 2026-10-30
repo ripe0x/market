@@ -4,7 +4,7 @@ Recorded 2026-10-30. Revision: see `git log`; contract `contracts/Market.sol`.
 
 ## Result
 
-**Gate passed for chain mechanics, with one open item.** Real signed OpenSea offers, with OpenSea's real zone signature and real zone signer, settle atomically against a declining Market listing on a pinned mainnet fork. Seller net, surplus routing, OpenSea fee, royalty, executor fee and protocol fee are exact to the wei, and nothing remains in Market.
+**Gate passed for chain mechanics; live OpenSea signing fails for a non-owner fulfiller (see Live fulfiller check).** Real signed OpenSea offers, with OpenSea's real zone signature and real zone signer, settle atomically against a declining Market listing on a pinned mainnet fork. Seller net, surplus routing, OpenSea fee, royalty, executor fee and protocol fee are exact to the wei, and nothing remains in Market.
 
 **Open item:** the fork runs place Market's code at the address OpenSea's zone signature already names (the original fulfiller of a historical fill). Live operation needs OpenSea to sign zone data naming the deployed Market address. That requires `POST /api/v2/offers/fulfillment_data` with an API key, which this session does not have. The endpoint's documentation describes no ownership check on the fulfiller, and onchain data shows OpenSea signing for contract fulfillers (router `0x0729E2a4716d9f7dD17858d5d504426D228697f7`, listing purchases). Bid fulfillment for a non-owner contract fulfiller is not yet observed. Reproduction is below.
 
@@ -71,11 +71,24 @@ The 384k figure includes two first-time WETH balance writes for fresh fee recipi
 
 `npm run e2e:keeper` (in `app/`) starts anvil at block 26303107, places Market's runtime at the zone-signed fulfiller, has a throwaway seller sign a listing, and runs the keeper's production `round()`: it prices the real offer from signed data, builds fulfillments, estimates gas, submits, records the receipt and syncs the `Sale` event joined to Seaport's order hash. Result: `{"ok":true,"gasUsed":"383763","available":"61083000000000000","seller":"60777585000000000"}`.
 
-## Reproduce the open item with an API key
+## Live fulfiller check (2026-10-30, with API key)
 
-1. Deploy Market to an anvil fork at the latest block (`scripts/fork.sh` prints the address).
-2. Run the keeper with `OPENSEA_API_KEY` and `KEEPER_UNLOCKED_ADDRESS` against that fork. `lib/opensea.ts::fulfillment` requests zone data naming the Market address.
-3. Pass: a `submitted` then `confirmed` log line. Fail modes to record: API refusal (status and message), `InvalidFulfiller` from the zone, or a substandard Market does not handle.
+**Result: fails for Market as designed.** OpenSea's `POST /api/v2/offers/fulfillment_data` signs zone data only when the fulfiller owns the NFT in OpenSea's indexed state.
+
+| Fulfiller requested | NFT and offer | Response |
+| --- | --- | --- |
+| Market deployed on a latest-block fork (`npm run live:fulfiller -- 0x34d85c9CDeB23FA97cb08333b511ac86E1C4E258 48816`) | Otherdeed #48816, live item offer | `400 Item is not owned by the fulfiller` |
+| `0x1111111111111111111111111111111111111111` (non-owner) | same | `400 Item is not owned by the fulfiller` |
+| The NFT's current owner | same | Signed; returns a `fulfillAdvancedOrder` call, not a match |
+| Seaport contract (non-owner) | same | `400 Account can not perform trading operations` |
+| Contracts that own Milady #3, #14, #19, #32 | Milady collection offer | Signed; extraData names each contract as fulfiller |
+| Contract that owns Milady #2 (`0x6FFd7EdE62328b3Af38FCD61461Bbfc52F5651fE`) | same | `400 Account can not perform trading operations` |
+
+Consequences:
+
+- The noncustodial design (seller keeps the NFT, Market fills through Seaport) cannot get a zone signature. The chain mechanics proven above still hold; the blocker is OpenSea's API policy.
+- A contract holding the NFT can be signed, so an escrow Market is viable, subject to OpenSea not blocking its address and to indexing delay after deposit.
+- Options and recommendation: `DECISIONS.md` D023.
 
 ## Limits
 

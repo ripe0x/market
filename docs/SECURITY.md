@@ -38,7 +38,7 @@ Approvals: sellers approve the OpenSea conduit (`setApprovalForAll`). That appro
 1. **Surplus can be taken by arbitrage.** Anyone may buy at the current price and sell into a higher offer themselves. This is inherent to a public declining price.
 2. **Executor fee can be front-run.** A keeper transaction's calldata works for any caller (the zone signature names Market, not the keeper). The seller is unaffected; the keeper loses its fee. The keeper refuses to match on mainnet without `SUBMIT_RPC_URL` (a private relay).
 3. **Old listings revive if the seller reacquires the NFT** before the listing ends and the conduit approval is still on. Cancel to prevent.
-4. **OpenSea dependency.** Live matching depends on OpenSea issuing zone signatures for Market as fulfiller (unverified, needs API key) and on its API's availability and rate limits.
+4. **OpenSea dependency.** OpenSea refuses zone signatures unless the fulfiller owns the NFT (D023), so live matching does not work in this design. Any design also depends on OpenSea not blocking the fulfiller address and on its API's availability and rate limits.
 5. **Stray WETH sent to Market** is paid to the next matched seller. Nothing else can withdraw it.
 6. **Operator-restricted (ERC721-C) collections** are untested.
 7. **No pause.** A bug fix needs a new deployment, and sellers must cancel old listings.

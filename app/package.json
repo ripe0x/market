@@ -9,7 +9,8 @@
     "keeper": "tsx keeper/run.ts",
     "test": "node --test --import tsx lib/*.test.ts keeper/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "e2e:keeper": "tsx keeper/e2e.ts"
+    "e2e:keeper": "tsx keeper/e2e.ts",
+    "live:fulfiller": "tsx keeper/live.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.3",

@@ -17,7 +17,7 @@ async function get(path: string, init?: RequestInit): Promise<any> {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt + Number(res.headers.get("retry-after") ?? 0) * 1000));
       continue;
     }
-    if (!res.ok) throw new Error(`OpenSea ${res.status} ${path.split("?")[0]}`);
+    if (!res.ok) throw new Error(`OpenSea ${res.status} ${path.split("?")[0]}: ${(await res.text()).slice(0, 300)}`);
     return res.json();
   }
 }
