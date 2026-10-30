@@ -48,7 +48,7 @@ Review these after the engineering agent has selected and implemented the simple
 2. D027: no per-sale storage; sale records are events plus the optional callback. Confirm this meets "verifiable sale records".
 3. D029: bids escrow their full budget (not allowance based). Eligibility is a token id range; merkle trait sets deferred.
 4. D032: no Market royalty on OpenSea fills, to avoid double charging. Royalty Registry not used.
-5. D033: 0.20% protocol, 0.30% executor on matches and OpenSea fills, 0.10% referral inside the protocol fee. Self-referral makes the protocol's take 0.10% on `buy` and bid sells (review finding 2). Alternatives: drop referral, or accept it as a rebate. Economics to be re-measured for the escrow design (`ECONOMICS.md`).
+5. D033: 0.20% protocol, 0.30% executor on matches and OpenSea fills, 0.10% referral inside the protocol fee. Self-referral makes the protocol's take 0.10% on `buy` and bid sells (review finding 2). Alternatives: drop referral, or accept it as a rebate. Measured: OpenSea fills viable from about 0.052 WETH and bid matches from about 0.023 WETH at 0.4 gwei (`ECONOMICS.md`).
 6. D023: mainnet canary still needed to prove OpenSea signs for Market's deployed address. Needs separate owner authorization and one low-value NFT.
 7. Owner address (currencies and zones) and protocol fee recipient for deployment, and who controls each.
 8. D014/D017: ETH in, WETH out for refunds. Confirm.
