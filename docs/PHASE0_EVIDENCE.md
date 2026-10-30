@@ -4,9 +4,11 @@ Recorded 2026-10-30. Revision: see `git log`; contract `contracts/Market.sol`.
 
 ## Result
 
-**Gate passed for chain mechanics; live OpenSea signing fails for a non-owner fulfiller (see Live fulfiller check).** Real signed OpenSea offers, with OpenSea's real zone signature and real zone signer, settle atomically against a declining Market listing on a pinned mainnet fork. Seller net, surplus routing, OpenSea fee, royalty, executor fee and protocol fee are exact to the wei, and nothing remains in Market.
+**Escrow route proven on a fork (2026-10-30).** Real signed OpenSea offers, with OpenSea's real zone signature and signer, fill from Market custody through `Seaport.fulfillAdvancedOrder` with Market as fulfiller. Splits are exact to the wei and nothing remains in Market. See "Escrow fill" below.
 
-**Open item:** the fork runs place Market's code at the address OpenSea's zone signature already names (the original fulfiller of a historical fill). Live operation needs OpenSea to sign zone data naming the deployed Market address. That requires `POST /api/v2/offers/fulfillment_data` with an API key, which this session does not have. The endpoint's documentation describes no ownership check on the fulfiller, and onchain data shows OpenSea signing for contract fulfillers (router `0x0729E2a4716d9f7dD17858d5d504426D228697f7`, listing purchases). Bid fulfillment for a non-owner contract fulfiller is not yet observed. Reproduction is below.
+The original noncustodial design (sections up to "Live fulfiller check") passed on chain mechanics but cannot get OpenSea's zone signature, because OpenSea signs only for the NFT's owner. That led to escrow (D023).
+
+**Open item:** OpenSea must sign for the deployed Market address. Only a mainnet canary can show it (`OPERATIONS.md`, step 6).
 
 ## Native Seaport test (D004)
 
@@ -133,3 +135,20 @@ A flash loan cannot fix the OpenSea refusal. OpenSea checks ownership offchain, 
 - Offers paying anything but WETH, or with non-WETH fee items, are excluded.
 - ERC721-C collections (zone substandards 7 to 9) are not tested.
 - Keyless OpenSea API responses are only served for cached URLs; per-NFT best offers and uncached metadata return 401. Discovery needs a key in practice.
+
+## Escrow fill (2026-10-30)
+
+`forge test --match-path test/OpenSea.t.sol`: 22/22 pass (11 per fixture).
+
+Route: the seller deposits the NFT with `safeTransferFrom(seller, market, id, 0x00 ‖ abi.encode(Listing))`. `Market.fillOffer(listing, id, offer, resolvers)` approves Seaport for that token and the offer's WETH consideration, calls `Seaport.fulfillAdvancedOrder(offer, resolvers, 0, market)`, checks the NFT left and Market's WETH did not fall, then pays fees and the seller. Resolvers index the offer as order 0.
+
+Both fixtures are OpenSea **match-shaped** fills (`matchAdvancedOrders`). Their zone extraData verifies unchanged under direct fulfillment. The zone checks fulfiller, expiration and order hash, not the call shape, so one onchain route covers both OpenSea response shapes (D034).
+
+| Fixture | Sale price (bidder paid) | Offer fee items | Seller | Executor 0.30% | Protocol 0.20% |
+| --- | --- | --- | --- | --- | --- |
+| `item_offer` | 0.0617 | 0.000617 | 0.0607745 | 0.0001851 | 0.0001234 |
+| `collection_offer_royalty` | 0.235 | 0.0141 (fee + royalty) | 0.2197250 | 0.000705 | 0.00047 |
+
+Assertions per fixture: NFT to bidder; bidder WETH down by the offer; each fee item paid exactly; seller, executor, protocol exact; Market WETH 0; listing consumed; replay reverts. Failure cases: ask one wei above proceeds, cancelled listing (then withdrawn), expired zone signature, zone disabled, Market at an address OpenSea did not sign for. Adversarial synthetic offers (zone relaxed to reach Seaport): an offer whose consideration takes more WETH out of Market than it pays in reverts with escrow intact; an offer that names another token reverts; a well-formed one splits exactly.
+
+Gas: `fillOffer` execution 435,583 on the item offer (`test/Gas.t.sol`).
