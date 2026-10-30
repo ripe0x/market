@@ -52,6 +52,19 @@ function Card({ l }: { l: Listing }) {
         <span className="num">{l.state === "scheduled" ? "Soon" : `${eth(l.price)} ETH`}</span>
       </div>
       <div className="small muted">{l.nft?.collection}</div>
+      <Track l={l} />
     </Link>
+  );
+}
+
+/** How far the price has fallen toward the floor. */
+function Track({ l }: { l: Listing }) {
+  const { startTime: a, endTime: b } = l.components;
+  const t = Number(l.now);
+  const f = Math.min(1, Math.max(0, (t - Number(a)) / (Number(b) - Number(a))));
+  return (
+    <div style={{ height: 1, background: "var(--faint)", marginTop: 10 }} aria-hidden>
+      <div style={{ height: 1, width: `${f * 100}%`, background: "var(--fg)" }} />
+    </div>
   );
 }

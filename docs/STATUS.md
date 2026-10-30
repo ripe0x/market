@@ -4,36 +4,44 @@ Updated: 2026-10-30
 
 ## State
 
-Specification only. This starter package was prepared for `ripe0x/market`, which was an empty GitHub repository at discovery. No contracts, application, keeper or test harness have been implemented in this package. No claims of real integration, audited code or deployed addresses.
-
-## Verified research, not implementation evidence
-
-1. Seaport supports time dependent item amounts, and exposes matching and fulfillment methods including criteria based advanced matching. This does not prove our exact settlement is compatible with OpenSea's live offers.
-2. OpenSea publishes collection offer discovery and an endpoint providing signatures and fulfillment data. The endpoint's output must be validated against the real order and onchain state.
-3. Ponytail is an official public coding agent plugin maintained at `DietrichGebert/ponytail`; prefer installing it in Claude Code through its documented commands, or apply its simplicity principles without unnecessary extra scaffolding.
-
-## Immediate next action
-
-Begin Roadmap Phase 0. Run and record a genuine atomic fill on a pinned mainnet fork, including fee and seller surplus routing. Decide on native Seaport matching versus a minimal authorization wrapper only after observing the result. Implement the remainder autonomously.
-
-## Unproven assumptions and blockers
-
-1. Actual OpenSea order compatibility with our desired surplus distribution and seller minimum enforcement.
-2. Current live offers, fulfillment payload access, RPC availability, API keys, zones, royalties and proof requirements.
-3. Gas economics for small NFT sizes and permissionless executor rewards.
-4. Discoverability of our signed orders through existing NFT marketplaces.
-
-## Launch boundary
-
-No transactions with real assets, mainnet deployment, paid services, marketing/public launch, or remote push without explicit owner authorization. Keep local commits and a reproducible handoff. Specs may evolve with genuine technical evidence.
+Implemented and locally verified: settlement contract, real-offer fork proof, direct buy, onchain cancel, keeper, order storage, web app, dry-run deployment. **Not deployed, not audited, not launch ready.** No real asset transactions, no mainnet deployment, no remote push.
 
 ## Milestone ledger
 
 | Phase | State | Evidence |
 | --- | --- | --- |
-| 0. Seaport integration proof | Not started | None |
-| 1. Settlement | Not started | None |
-| 2. Matcher | Not started | None |
-| 3. User interface | Not started | None |
-| 4. Review and economic test | Not started | None |
-| 5. Deployment readiness | Not started | None |
+| 0. Seaport integration proof | Passed for chain mechanics; live fulfiller signing open (needs API key) | `PHASE0_EVIDENCE.md`, `test/MatchOffer.t.sol` |
+| 1. Settlement | Done | `contracts/Market.sol`; `test/Buy.t.sol`, `test/Adversarial.t.sol` |
+| 2. Matcher | Done; live OpenSea fulfillment untested without key | `app/keeper/`, `npm run e2e:keeper` |
+| 3. User interface | Done; exercised end to end on a local fork | `scripts/fork.sh` session below |
+| 4. Review and economics | Independent review done (see `SECURITY.md`); economics measured | `SECURITY.md`, `ECONOMICS.md` |
+| 5. Deployment readiness | Dry run passes; mainnet blocked on audit and owner decisions | `OPERATIONS.md` |
+
+## Verification record
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Real OpenSea offers, both fixtures | `forge test --match-path test/MatchOffer.t.sol` | 20/20 pass |
+| Direct buy, pricing fuzz | `forge test --match-path test/Buy.t.sol` | 15/15 pass (fuzz 256 runs each) |
+| Adversarial | `forge test --match-path test/Adversarial.t.sol` | 7/7 pass |
+| TS unit and fixture parity | `cd app && npm test` | 7/7 pass |
+| Keeper on fork, real offer | `cd app && npm run e2e:keeper` | pass, 383,763 gas |
+| Typecheck, production build | `npx tsc --noEmit`, `npx next build` | pass |
+| Deploy dry run | `forge script script/Deploy.s.sol --rpc-url mainnet` | pass, 2.34M gas |
+| UI on local fork | list, approve, sign, buy, keeper match, cancel, yours page, mobile, light and dark | pass |
+
+Full suite as a release candidate (`CANDIDATE_RUN=1`) has not been run.
+
+## Open blockers
+
+1. **OpenSea API key.** Needed to confirm OpenSea signs zone data for the Market address as fulfiller, and for live discovery. Procedure: `PHASE0_EVIDENCE.md`.
+2. **Independent audit** of `contracts/Market.sol` by a qualified human reviewer before any deployment with value.
+3. **Owner decisions:** fee recipient address, D016 (no floor hold), D017 (WETH refund). See `DECISIONS.md` Owner Review.
+
+## Next action
+
+Provide an OpenSea API key, then run the fulfiller check in `PHASE0_EVIDENCE.md` against a fork at the latest block.
+
+## Launch boundary
+
+No transactions with real assets, mainnet deployment, paid services, public launch, or remote push without explicit owner authorization.

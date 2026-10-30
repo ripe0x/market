@@ -27,7 +27,10 @@ export const hydrate = (l: any): Listing => ({ ...l, components: fromJson(JSON.s
 export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    const msg = String(body.error ?? `request failed (${res.status})`);
+    throw new Error(msg[0].toUpperCase() + msg.slice(1) + ".");
+  }
   return body;
 }
 
