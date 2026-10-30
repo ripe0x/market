@@ -35,13 +35,13 @@ Full suite as a release candidate (`CANDIDATE_RUN=1`) has not been run.
 
 ## Open blockers
 
-1. **OpenSea API key.** Needed to confirm OpenSea signs zone data for the Market address as fulfiller, and for live discovery. Procedure: `PHASE0_EVIDENCE.md`.
+1. **OpenSea API key.** Deferred by owner on 2026-10-30. Needed to confirm OpenSea signs zone data for the Market address as fulfiller, and for live discovery. Must pass before the keeper runs on mainnet. Procedure: `PHASE0_EVIDENCE.md`.
 2. **Independent audit** of `contracts/Market.sol` by a qualified human reviewer before any deployment with value.
 3. **Owner decisions:** fee recipient address, D016 (no floor hold), D017 (WETH refund). See `DECISIONS.md` Owner Review.
 
 ## Next action
 
-Provide an OpenSea API key, then run the fulfiller check in `PHASE0_EVIDENCE.md` against a fork at the latest block.
+Owner decides the fee recipient, D016 and D017 (`DECISIONS.md` Owner Review). The OpenSea fulfiller check waits for an API key.
 
 ## Launch boundary
 
