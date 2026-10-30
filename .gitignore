@@ -1,0 +1,10 @@
+out/
+cache/
+broadcast/*/31337/
+node_modules/
+.next/
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
