@@ -102,7 +102,21 @@ const listing = buildListing({
 });
 const signature = await seller.signTypedData({ domain: seaportDomain, types: orderTypes, primaryType: "OrderComponents", message: listing });
 const hash = (await test.readContract({ address: SEAPORT, abi: seaportAbi, functionName: "getOrderHash", args: [listing] })).toLowerCase();
-db().prepare("insert into listings values (?,?,?,?,?,?,?)").run(hash, seller.address.toLowerCase(), nft.toLowerCase(), tokenId.toString(), toJson(listing), signature, Date.now());
+// Listing intake through the real API route: only a valid, owned, correctly signed listing is stored.
+const { POST } = await import("../src/app/api/listings/route");
+const post = async (components: object, sig: Hex) => {
+  const res = await POST(new Request("http://x/api/listings", { method: "POST", body: JSON.stringify({ components: JSON.parse(toJson(components as any)), signature: sig }) }));
+  return { status: res.status, body: await res.json() };
+};
+const stranger = privateKeyToAccount(generatePrivateKey());
+const bad = await stranger.signTypedData({ domain: seaportDomain, types: orderTypes, primaryType: "OrderComponents", message: listing });
+assert.deepEqual(await post(listing, bad), { status: 400, body: { error: "bad signature" } });
+const strangerListing = { ...listing, offerer: stranger.address, consideration: [{ ...listing.consideration[0], recipient: stranger.address }] };
+const strangerSig = await stranger.signTypedData({ domain: seaportDomain, types: orderTypes, primaryType: "OrderComponents", message: strangerListing });
+assert.deepEqual(await post(strangerListing, strangerSig), { status: 400, body: { error: "seller does not own this NFT" } });
+assert.deepEqual(await post({ ...listing, zone: SEAPORT }, signature), { status: 400, body: { error: "wrong zone" } });
+assert.deepEqual(await post({ ...listing, counter: 5n }, signature), { status: 400, body: { error: "stale counter" } });
+assert.deepEqual(await post(listing, signature), { status: 201, body: { hash } });
 writeFileSync(process.env.DEV_OFFERS_FILE!, JSON.stringify([{ hash: "fixture", nft, tokenId: tokenId.toString(), order: bidJson }]));
 
 // Round 1 submits; anvil automines. Round 2 records the receipt and the sale.
