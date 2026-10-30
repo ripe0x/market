@@ -54,18 +54,8 @@ const { round } = await import("./run");
 const { parseBid, released } = await import("./match");
 
 const wethAbi = parseAbi(["function balanceOf(address) view returns (uint256)", "function transfer(address,uint256) returns (bool)", "function approve(address,uint256) returns (bool)"]);
-const matchAbi = parseAbi([
-  "struct OfferItem { uint8 itemType; address token; uint256 identifierOrCriteria; uint256 startAmount; uint256 endAmount; }",
-  "struct ConsiderationItem { uint8 itemType; address token; uint256 identifierOrCriteria; uint256 startAmount; uint256 endAmount; address recipient; }",
-  "struct OrderParameters { address offerer; address zone; OfferItem[] offer; ConsiderationItem[] consideration; uint8 orderType; uint256 startTime; uint256 endTime; bytes32 zoneHash; uint256 salt; bytes32 conduitKey; uint256 totalOriginalConsiderationItems; }",
-  "struct AdvancedOrder { OrderParameters parameters; uint120 numerator; uint120 denominator; bytes signature; bytes extraData; }",
-  "struct CriteriaResolver { uint256 orderIndex; uint8 side; uint256 index; uint256 identifier; bytes32[] criteriaProof; }",
-  "struct FulfillmentComponent { uint256 orderIndex; uint256 itemIndex; }",
-  "struct Fulfillment { FulfillmentComponent[] offerComponents; FulfillmentComponent[] considerationComponents; }",
-  "function matchAdvancedOrders(AdvancedOrder[] orders, CriteriaResolver[] criteriaResolvers, Fulfillment[] fulfillments, address recipient)",
-]);
-const { args } = decodeFunctionData({ abi: matchAbi, data: fixture.input as Hex });
-const bidJson = JSON.parse(JSON.stringify(args[0][0], (_, v) => (typeof v === "bigint" ? v.toString() : v)));
+const { args } = decodeFunctionData({ abi: seaportAbi, data: fixture.input as Hex });
+const bidJson = JSON.parse(JSON.stringify((args as any)[0][0], (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 const bid = parseBid(bidJson);
 const nft = bid.parameters.consideration[0].token;
 const tokenId = bid.parameters.consideration[0].identifierOrCriteria;

@@ -1,6 +1,17 @@
 # Functional specification: Market
 
-Status: initial specification. Created 2026-10-30. No implementation or live integration has been verified here.
+Status: revised 2026-10-30 after Phase 0. Implemented; see `STATUS.md`.
+
+## 0. Revisions from implementation evidence
+
+1. Settlement is a native Seaport 1.6 listing restricted to zone = Market. Market is the only possible fulfiller and splits the surplus (D004, D015).
+2. The price falls from start to floor and the listing ends there. No hold at floor (D016). Section 3.1 step 2 and 4.1 below are amended.
+3. Direct buyers pay ETH; overpayment returns as WETH (D014, D017). Direct-buy fee is 0.20% to protocol, paid by the buyer (D006).
+4. Sellers approve the OpenSea conduit, usually already done; Market holds no approvals (D018). Proceeds go to the seller (D019).
+5. Fee limits are bound by the signed zone address: each Market deployment has constant fees (D015).
+6. Supported offers: WETH item offers and collection offers on Seaport 1.6; trait offers excluded (D020).
+7. Matching needs an OpenSea API key; keyless access is unreliable (D021).
+
 
 ## 1. Purpose and product promise
 
@@ -23,7 +34,7 @@ Not intended for initial mint drops, complex auctions, guaranteed liquidation, c
 ### 3.1 Seller creates a listing
 
 1. Connect an Ethereum wallet and select an ERC721 NFT that the wallet owns.
-2. Enter starting seller net price, minimum seller net price, time until the price reaches that minimum, and expiry. The minimum must be at most the start. The expiry must be at or after the decline ends. The UI presents plain values and clear transaction and authorization details.
+2. Enter starting seller net price, minimum seller net price and the time until the price reaches that minimum, which is also when the listing ends. The minimum must be at most the start, and the start must be above zero. The UI presents plain values and clear transaction and authorization details.
 3. Show a live projected net price schedule and the extra execution fees required for a direct buyer. The listed price is the minimum NET proceeds guaranteed to the seller in WETH, after our protocol and executor fees and any external mandatory consideration. Display the distinction explicitly.
 4. Seller signs a bounded order or authorization and grants only the necessary NFT approval to the verified settlement operator. Prefer standard signed Seaport orders and native approvals if they can enforce the same guarantees; otherwise use the smallest EIP712 sale authorization and settlement contract that does.
 5. Save the signed listing through an authenticated endpoint and show its onchain signature validity and live state. No NFT escrow or token deposit.
@@ -56,7 +67,7 @@ Show active listings, price now, price at expiry, ownership, order validity, rec
 
 ## 4. Pricing and order policy
 
-1. V1: a deterministic linear decline by block timestamp from the start net amount to the floor net amount. Hold at the floor after the decline ends until order expiry; then the order is invalid. Inputs are fixed by a wallet signature. Never increase the seller's required amount through rounding.
+1. V1: a deterministic linear decline by block timestamp from the start net amount to the floor net amount, ending at the order's end time; then the order is invalid. Rounding follows Seaport (consideration rounds up), and the price never increases. Inputs are fixed by a wallet signature. Never increase the seller's required amount through rounding.
 2. All settlement accounting and authorization are in WETH on Ethereum mainnet. The frontend may display an ETH equivalent because WETH and ETH are redeemable 1:1, but it must make the actual token payment clear. Optional native ETH convenience may be added only if straightforward and tested.
 3. One ERC721 per listing, one fill per listing, no partial fills, leverage, complex bids or multichain routing. Supported collections may initially be curated by the app for tested compatibility; avoid unnecessary mutable contract allowlists.
 4. Initial tentative total fee: 0.50% of available proceeds after mandatory external considerations. Tentative split: 0.30% executor and 0.20% protocol, with explicit recipients. Revisit these exact values using real fork gas and offer economics before implementation freeze. A keeper may skip uneconomic fills. Do not subsidize every sale or seize any extra spread.

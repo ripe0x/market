@@ -7,27 +7,38 @@ Status labels: Baseline means recommended product direction for implementation. 
 | D001 | Baseline | Independent Ethereum mainnet ERC721 product | Avoid copying CC mechanics or building an ERC20 exchange. |
 | D002 | Baseline | Seller chooses linear declining minimum NET WETH proceeds with optional nonzero floor, expiry and explicit zero floor opt in | Simple user control; clear safety constraint. Alternative gross price hidden fees was rejected. |
 | D003 | Baseline | Noncustodial signed authorization, onchain cancellation and atomic fulfillment | Seller keeps NFT before fill and has enforceable terms. |
-| D004 | Provisional | Test standard Seaport dynamic listings and native match before any custom contract | Native protocol can reduce new attack surface. Must prove surplus routing on a real fork. |
+| D004 | Baseline (2026-10-30) | Native Seaport listing restricted to zone = Market; Market is the only fulfiller and splits the surplus | Native matching cannot route surplus to the seller (unspent items go to a caller-chosen recipient). Seaport skips zone checks only when the caller is the zone, so one small zone contract closes the gap. See D015. |
 | D005 | Baseline | Start with OpenSea item and collection bids; trait offers later if straightforward | Existing liquidity without own bid infrastructure; avoid promising universal marketplace support. |
-| D006 | Provisional | 0.50 percent total fee on net available offer proceeds after mandatory external considerations, divided 0.30 percent to executor and 0.20 percent to protocol | Aligns sellers and makes independent execution possible; real gas economics may require change. |
+| D006 | Baseline (2026-10-30) | Keep 0.30% executor + 0.20% protocol on matches; 0.20% protocol on direct buys, paid by the buyer | Measured: match viable from about 0.064 WETH at 0.4 gwei, 0.48 at 3 gwei. See `ECONOMICS.md`. |
 | D007 | Baseline | Seller receives the entire net of the selected offer after mandatory external considerations and authorized fees | Don't let executor quietly capture surplus. |
 | D008 | Baseline | Keeper run by protocol plus permissionless execution | Product stays usable if our worker stops; executor reward comes from disclosed fees. |
-| D009 | Provisional | One small web app, one worker, minimal durable order store | Avoid premature infra; decide database and hosting after a working prototype. |
+| D009 | Baseline (2026-10-30) | One Next.js app plus one keeper process sharing a SQLite file through Node's built-in `node:sqlite` | Zero database dependency. Chain is the source of truth; storage holds signed orders, synced sales and the keeper's in-flight tx. Needs a host with a persistent disk. |
 | D010 | Deferred | ERC20 swaps, cross chain, new token, full NFT marketplace and complex auctions | Distract from the validated seller problem and duplicate established systems. |
 | D011 | Baseline | No authority for founder to take NFTs or seller proceeds; prefer a replaceable stateless version over upgradeable custody | Upgradeability should not create an extraction backdoor. |
 | D012 | Baseline | Mainnet fork and actual signed Seaport orders required before claiming integration success | Mocks do not test real zones, signatures and consideration. |
 | D013 | Baseline | Sellers may get a better price than their current minimum, but app cannot promise globally best price or guaranteed sale | Market data is incomplete and execution is competitive. |
-| D014 | Provisional | Default to simple native WETH accounting; only add ETH convenience if easy and safe | Reduces settlement paths and ambiguity about token delivered. |
+| D014 | Baseline (2026-10-30) | Sellers are paid in WETH. Direct buyers pay ETH; Market wraps it. Overpayment returns as WETH | ETH payment removes a buyer approval transaction. See D017 for the refund token. |
+| D015 | Baseline | Market contract: zone and sole fulfiller, no owner, no upgrade, no pause, fees as constants, one immutable protocol recipient | Options: native match only (fails surplus routing), custom EIP-712 authorization with NFT custody in our contract (new approval per seller, new signing scheme, custody during the tx, breaks for operator-restricted collections), Seaport zone (chosen). Evidence: `PHASE0_EVIDENCE.md`. Rollback: deploy a new version; old listings stay bound to the old zone until they expire or are cancelled. Owner review recommended. |
+| D016 | Baseline | Price falls linearly from start to floor and the listing ends when it reaches the floor; no hold at floor | Seaport's native interpolation covers the whole order window. A hold would need either a second signed order or a custom price check that wallets would show as an opaque zone hash. Relisting is a free signature. Revisit if sellers ask for long floor holds. Owner review recommended. |
+| D017 | Baseline | Direct-buy overpayment is returned as WETH, not ETH | Found on the fork: an ETH refund call into an EIP-7702 delegated buyer ran out of gas. A WETH transfer never runs buyer code, removes a reentrancy surface and a revert path. Cost: buyers may receive small WETH amounts. |
+| D018 | Baseline | Listings use the OpenSea conduit key | Most sellers in established collections already approved it, so listing is usually signature-only; conduit transfers also suit operator-restricted collections. The approval is shared with OpenSea and outlives cancellation; the UI says so. Alternative: conduit key 0 (approve Seaport directly). |
+| D019 | Baseline | Proceeds recipient is the seller | Simplest safe binding; the API rejects other recipients. Market itself pays surplus to whatever recipient the seller signed. |
+| D020 | Baseline | Supported offers: Seaport 1.6, single WETH offer item, ERC721 item offers and criteria-0 collection offers, WETH-only fee items. Trait offers excluded | Trait offers need proofs; non-WETH items would strand value. Market enforces the WETH offer; the keeper enforces the rest. |
+| D021 | Provisional | OpenSea API key is required for matching and wallet NFT lists | Keyless responses are only served for cached URLs. Without a key the app still lists, buys, cancels and reads art from tokenURI; the footer shows matching off. |
+| D022 | Baseline | Keeper submits one transaction at a time; a stuck one is replaced by a zero-value self transfer at the same nonce | OpenSea zone signatures expire in minutes, so re-sending old calldata is pointless. Simple nonce handling and idempotent restarts. |
 
 ## Owner Review
 
 Review these after the engineering agent has selected and implemented the simplest verified approach. The agent should record its final recommendation and alternatives without stopping to request ordinary approval.
 
-1. D004: Was native Seaport settlement sufficient? If not, exactly what additional contract was proven necessary?
-2. D006: Is a 0.50 percent fee with a 0.30/0.20 split economically viable at measured gas rates? Should the minimum supported sale amount be limited?
-3. D009: Which hosting and database option was selected and why? Any recurring operating cost?
-4. D014: Is WETH only sufficiently clear for the initial user experience, or does ETH convenience materially simplify it?
-5. Actual audit findings, permissions and unresolved major launch blockers, if any.
+1. D004/D015: Native Seaport alone cannot route surplus. Recommendation: the Market zone contract, about 150 lines, no admin. Approve the design before any independent audit is commissioned.
+2. D006: 0.5% total is viable from about 0.064 WETH at today's 0.4 gwei, about 0.48 WETH at 3 gwei. Recommendation: keep it and let the keeper skip small fills; no contract minimum.
+3. D009: One host, Next.js plus keeper, SQLite file. Recurring cost: host, RPC, free OpenSea key.
+4. D014/D017: Buyers pay ETH, sellers receive WETH, buyer overpayment returns as WETH. Confirm the WETH refund is acceptable.
+5. D016: No floor hold. Confirm, or ask for a second signed floor order.
+6. D021: Provide an OpenSea API key so the live fulfiller check in `PHASE0_EVIDENCE.md` can run.
+7. Protocol fee recipient address for deployment, and who controls it.
+8. Review findings and launch blockers: `SECURITY.md`.
 
 ## Instructions for future decisions
 
