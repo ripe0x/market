@@ -70,7 +70,6 @@ contract Market {
     error NotWethOffer();
     error InsufficientPayment();
     error NftNotDelivered();
-    error RefundFailed();
 
     modifier lock() {
         if (locked) revert Locked();
@@ -85,24 +84,22 @@ contract Market {
     }
 
     /// @notice Buy a listing with ETH at its current price plus the protocol fee.
-    /// Send at least `currentPrice * (1 + PROTOCOL_FEE_BPS / BPS)`; the price only
-    /// falls, so any excess from inclusion delay is refunded.
+    /// Send at least `currentPrice * (1 + PROTOCOL_FEE_BPS / BPS)`. The price only
+    /// falls, so a quote from an earlier block overpays slightly; the excess is
+    /// returned as WETH, which never calls into the buyer's address.
     function buy(AdvancedOrder calldata listing) external payable lock {
         (address nft, uint256 tokenId, uint256 price) = _listing(listing.parameters);
         uint256 protocolFee = price * PROTOCOL_FEE_BPS / BPS;
         uint256 total = price + protocolFee;
         if (msg.value < total) revert InsufficientPayment();
 
-        WETH.deposit{value: total}();
+        WETH.deposit{value: msg.value}();
         // This contract is the fulfiller: Seaport pulls `price` WETH from here to
         // the seller and sends the NFT to the buyer.
         SEAPORT.fulfillAdvancedOrder(listing, new CriteriaResolver[](0), bytes32(0), msg.sender);
         WETH.transfer(PROTOCOL_FEE_RECIPIENT, protocolFee);
+        if (msg.value > total) WETH.transfer(msg.sender, msg.value - total);
 
-        if (msg.value > total) {
-            (bool ok,) = msg.sender.call{value: msg.value - total}("");
-            if (!ok) revert RefundFailed();
-        }
         emit Sale(listing.parameters.offerer, msg.sender, nft, tokenId, price, 0, protocolFee);
     }
 

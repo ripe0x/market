@@ -7,6 +7,10 @@ contract RejectsEth {
     function buy(Market m, AdvancedOrder calldata l) external payable {
         m.buy{value: msg.value}(l);
     }
+
+    receive() external payable {
+        revert();
+    }
 }
 
 contract BuyTest is Base {
@@ -55,8 +59,10 @@ contract BuyTest is Base {
         uint256 due = total(market.currentPrice(l.parameters));
         vm.prank(buyer);
         market.buy{value: quoted}(l);
-        assertEq(buyer.balance, 100 ether - due);
+        assertEq(buyer.balance, 100 ether - quoted);
+        assertEq(WETH.balanceOf(buyer), quoted - due, "excess back as WETH");
         assertEq(address(market).balance, 0);
+        assertEq(WETH.balanceOf(address(market)), 0);
     }
 
     function test_revertWhenUnderpaid() public {
@@ -174,13 +180,15 @@ contract BuyTest is Base {
         market.buy{value: 3 ether}(l);
     }
 
-    function test_revertWhenRefundRejected() public {
+    /// A buyer that rejects ETH still gets its excess, as WETH.
+    function test_contractBuyerThatRejectsEth() public {
         RejectsEth c = new RejectsEth();
         vm.deal(address(c), 3 ether);
         AdvancedOrder memory l = decliningListing();
-        vm.expectRevert(Market.RefundFailed.selector);
+        uint256 due = total(market.currentPrice(l.parameters));
         c.buy{value: 3 ether}(market, l);
-        assertEq(IERC721(nft).ownerOf(tokenId), seller.addr);
+        assertEq(IERC721(nft).ownerOf(tokenId), address(c));
+        assertEq(WETH.balanceOf(address(c)), 3 ether - due);
     }
 
     function test_rejectsOtherShapes() public {

@@ -202,7 +202,6 @@ export const marketAbi = parseAbi([
   "error NotWethOffer()",
   "error InsufficientPayment()",
   "error NftNotDelivered()",
-  "error RefundFailed()",
 ]);
 
 export const erc721Abi = parseAbi([

@@ -20,7 +20,9 @@ const log = (event: string, data: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 
 const key = process.env.KEEPER_PRIVATE_KEY as Hex | undefined;
-const account = key ? privateKeyToAccount(key) : undefined;
+// Local fork only: an anvil-unlocked address signs through the node, so no key is handled.
+const unlocked = /127\.0\.0\.1|localhost/.test(rpcUrl) ? (process.env.KEEPER_UNLOCKED_ADDRESS as Hex | undefined) : undefined;
+const account = key ? privateKeyToAccount(key) : unlocked ? { address: unlocked, type: "json-rpc" as const } : undefined;
 // Optional private submission endpoint (for example Flashbots Protect) against front-running.
 const wallet = account && createWalletClient({ account, chain: mainnet, transport: http(process.env.SUBMIT_RPC_URL ?? rpcUrl) });
 export const matching = Boolean(wallet && (os.apiKey || DEV_OFFERS_FILE));
