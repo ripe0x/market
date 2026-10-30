@@ -8,6 +8,7 @@ solc = "0.8.28"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 10000
+via_ir = true
 fs_permissions = [{ access = "read", path = "./test/fixtures" }]
 remappings = [
   "seaport-types/=lib/seaport-types/",
@@ -16,6 +17,10 @@ remappings = [
 
 [fuzz]
 runs = 256
+
+[invariant]
+runs = 64
+depth = 100
 
 [rpc_endpoints]
 mainnet = "https://mainnet.gateway.tenderly.co"

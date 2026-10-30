@@ -4,46 +4,38 @@ Updated: 2026-10-30
 
 ## State
 
-Implemented and locally verified: settlement contract, real-offer fork proof, direct buy, onchain cancel, keeper, order storage, web app, dry-run deployment. **Not deployed, not audited, not launch ready.** No real asset transactions, no mainnet deployment, no remote push.
+**Escrow redesign in progress (owner decisions D023 to D035).** The new `contracts/Market.sol` (shared escrow: listings, bids, OpenSea fills) is implemented and tested. The keeper and web app still target the old noncustodial contract and do not work with it yet. **Not deployed, not audited, not launch ready.**
 
 ## Milestone ledger
 
 | Phase | State | Evidence |
 | --- | --- | --- |
-| 0. Seaport integration proof | Chain mechanics pass; live OpenSea signing fails: OpenSea signs only for the NFT owner (D023) | `PHASE0_EVIDENCE.md`, `test/MatchOffer.t.sol` |
-| 1. Settlement | Done | `contracts/Market.sol`; `test/Buy.t.sol`, `test/Adversarial.t.sol` |
-| 2. Matcher | Built; blocked on mainnet by D023 | `app/keeper/`, `npm run e2e:keeper` |
-| 3. User interface | Done; exercised end to end on a local fork | `scripts/fork.sh` session below |
-| 4. Review and economics | Independent review done (see `SECURITY.md`); economics measured | `SECURITY.md`, `ECONOMICS.md` |
-| 5. Deployment readiness | Dry run passes; mainnet blocked on audit and owner decisions | `OPERATIONS.md` |
+| 0. Seaport integration proof | Done for escrow: real OpenSea offers fill from Market custody | `test/OpenSea.t.sol`, `PHASE0_EVIDENCE.md` |
+| 1. Settlement (escrow) | Implemented and tested | `contracts/Market.sol`; `test/Local.t.sol`, `test/Invariant.t.sol`, `test/OpenSea.t.sol` |
+| 2. Keeper | Needs rework for escrow | `app/keeper/` |
+| 3. User interface | Needs rework for escrow | `app/src/` |
+| 4. Review and economics | Pending for escrow design | |
+| 5. Deployment readiness | Deploy script updated; dry run pending | `script/Deploy.s.sol` |
 
 ## Verification record
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Real OpenSea offers, both fixtures | `forge test --match-path test/MatchOffer.t.sol` | 20/20 pass |
-| Direct buy, pricing fuzz | `forge test --match-path test/Buy.t.sol` | 15/15 pass (fuzz 256 runs each) |
-| Adversarial | `forge test --match-path test/Adversarial.t.sol` | 7/7 pass |
-| TS unit and fixture parity | `cd app && npm test` | 8/8 pass |
-| Independent review tests | `forge test --match-path test/review/Review.t.sol` | 4/4 pass |
-| Keeper on fork, real offer, API intake | `cd app && npm run e2e:keeper` | pass, 383,787 gas |
-| OpenSea eligibility and indexing; venue liquidity | `cd app && npx tsx research/eligibility.ts`, `research/indexing-recent.ts`, `research/indexing-live.ts` | 45/48 contracts signed; indexed in 2 to 8 s; OpenSea carries about 99% of bids |
-| Live OpenSea fulfiller, latest-block fork | `cd app && npm run live:fulfiller -- <nft> <tokenId>` with `OPENSEA_API_KEY` | fail: `Item is not owned by the fulfiller` (D023) |
-| Typecheck, production build | `npx tsc --noEmit`, `npx next build` | pass |
-| Deploy dry run | `forge script script/Deploy.s.sol --rpc-url mainnet` | pass, 2.34M gas |
-| UI on local fork | list, approve, sign, buy, keeper match, cancel, yours page, mobile, light and dark | pass |
+| Real OpenSea offers from escrow, both fixtures, adversarial offers | `forge test --match-path test/OpenSea.t.sol` | 22/22 pass |
+| Listings, buys, bids, matches, royalties, strategies, callbacks, fuzz | `forge test --match-path test/Local.t.sol --fuzz-runs 2000` | 28/28 pass |
+| Escrow solvency and custody invariants | `forge test --match-path test/Invariant.t.sol` | pass, 64 runs x 100 calls, sales in every run |
 
-Full suite as a release candidate (`CANDIDATE_RUN=1`) has not been run.
+Earlier noncustodial evidence (superseded contract) remains in git history before this commit.
 
 ## Open blockers
 
-1. **D023: OpenSea signs offers only for the NFT owner.** Checked live on 2026-10-30. Investigation done: escrow is practical (45 of 48 contract holders signed; deposits indexed in 2 to 8 seconds), and there is no usable noncustodial liquidity elsewhere. Recommendation: escrow for all listings. Owner approval needed. Evidence: `PHASE0_EVIDENCE.md`.
-2. **Independent audit** of `contracts/Market.sol` by a qualified human reviewer before any deployment with value.
-3. **Owner decisions:** fee recipient address, D016 (no floor hold), D017 (WETH refund). See `DECISIONS.md` Owner Review.
+1. **Mainnet canary (D023):** only a deployment can prove OpenSea signs for Market's address. Needs separate owner authorization.
+2. **Independent audit** of `contracts/Market.sol` before any deployment with value.
+3. **Owner decisions:** owner and fee recipient addresses; see `DECISIONS.md` Owner Review.
 
 ## Next action
 
-Owner approves or rejects escrow (D023). If approved: redesign Market for custody, prove it on a fork with live OpenSea zone data, and get an independent review. Then plan a mainnet canary with one low-value NFT, which needs separate authorization.
+Rework the keeper and app for escrow, then independent review, economics and deploy dry run.
 
 ## Launch boundary
 

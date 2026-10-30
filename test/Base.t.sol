@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
-import {Market, IWETH, IERC721} from "../contracts/Market.sol";
+import {Market, IERC721} from "../contracts/Market.sol";
 import {ConsiderationInterface} from "seaport-types/src/interfaces/ConsiderationInterface.sol";
 import {
     AdvancedOrder,
@@ -16,9 +16,14 @@ import {
 } from "seaport-types/src/lib/ConsiderationStructs.sol";
 import {ItemType, OrderType, Side} from "seaport-types/src/lib/ConsiderationEnums.sol";
 
-interface IERC721Full is IERC721 {
-    function transferFrom(address from, address to, uint256 id) external;
-    function setApprovalForAll(address operator, bool approved) external;
+interface IERC20 {
+    function balanceOf(address) external view returns (uint256);
+    function transfer(address, uint256) external returns (bool);
+    function approve(address, uint256) external returns (bool);
+}
+
+interface IERC721Safe is IERC721 {
+    function safeTransferFrom(address from, address to, uint256 id, bytes calldata data) external;
 }
 
 /// Shared fork harness. Every bid used here is a real signed OpenSea offer taken
@@ -26,13 +31,15 @@ interface IERC721Full is IERC721 {
 /// fork pinned one block before that fill.
 abstract contract Base is Test {
     ConsiderationInterface constant SEAPORT = ConsiderationInterface(0x0000000000000068F116a894984e2DB1123eB395);
-    IWETH constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    IERC20 constant WETH = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    address constant OS_ZONE = 0x000056F7000000EcE9003ca63978907a00FFD100;
     bytes32 constant OS_CONDUIT_KEY = 0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000;
     address constant OS_CONDUIT = 0x1E0049783F008A0085193E00003D00cd54003c71;
 
     Market market;
     address protocol = makeAddr("protocol");
     address keeper = makeAddr("keeper");
+    address admin = makeAddr("admin");
     Vm.Wallet seller = vm.createWallet("seller");
 
     // Loaded from a fixture.
@@ -57,14 +64,13 @@ abstract contract Base is Test {
         vm.warp(txTimestamp);
 
         (AdvancedOrder[] memory orders, CriteriaResolver[] memory res,,) = abi.decode(
-            this.cut4(vm.parseJsonBytes(json, ".input")),
-            (AdvancedOrder[], CriteriaResolver[], Fulfillment[], address)
+            this.cut4(vm.parseJsonBytes(json, ".input")), (AdvancedOrder[], CriteriaResolver[], Fulfillment[], address)
         );
         bidBlob = abi.encode(orders[0]);
         nft = orders[0].parameters.consideration[0].token;
         tokenId = orders[0].parameters.consideration[0].identifierOrCriteria;
         for (uint256 i; i < res.length; i++) {
-            res[i].orderIndex = 1; // bid sits at index 1 in [listing, bid]
+            res[i].orderIndex = 0; // fillOffer passes the offer alone
             tokenId = res[i].identifier;
         }
         resolversBlob = abi.encode(res);
@@ -86,33 +92,29 @@ abstract contract Base is Test {
 
     /// Place Market at the address OpenSea's real zone signature names, so the
     /// zone runs unmodified with OpenSea's real signer. The original fulfiller is
-    /// an EOA; its NFT moves to our seller and its WETH is swept out first.
+    /// an EOA; its WETH is swept out first so Market starts empty.
     function deployMarketAtSignedFulfiller() internal {
-        giveNftToSeller();
-        uint256 stray = WETH.balanceOf(fulfiller);
+        uint256 stray = IERC20(address(WETH)).balanceOf(fulfiller);
         if (stray != 0) {
             vm.prank(fulfiller);
-            WETH.transfer(makeAddr("sink"), stray);
+            IERC20(address(WETH)).transfer(makeAddr("sink"), stray);
         }
-        deployCodeTo("Market.sol:Market", abi.encode(protocol), fulfiller);
+        deployCodeTo("Market.sol:Market", abi.encode(protocol, admin, OS_ZONE), fulfiller);
         market = Market(fulfiller);
+        giveNftToSeller();
     }
 
-    /// Fresh Market at a new address, for tests that do not need OpenSea's zone.
+    /// Fresh Market at a new address, which OpenSea's zone signature does not name.
     function deployMarket() internal {
-        giveNftToSeller();
-        // A fixed fresh address: CREATE addresses from the default test deployer
-        // hold stray mainnet WETH on the fork.
-        deployCodeTo("Market.sol:Market", abi.encode(protocol), makeAddr("market"));
+        deployCodeTo("Market.sol:Market", abi.encode(protocol, admin, OS_ZONE), makeAddr("market"));
         market = Market(makeAddr("market"));
+        giveNftToSeller();
     }
 
     function giveNftToSeller() internal {
         address owner = IERC721(nft).ownerOf(tokenId);
         vm.prank(owner);
-        IERC721Full(nft).transferFrom(owner, seller.addr, tokenId);
-        vm.prank(seller.addr);
-        IERC721Full(nft).setApprovalForAll(OS_CONDUIT, true);
+        IERC721(nft).transferFrom(owner, seller.addr, tokenId);
     }
 
     /// A synthetic open WETH offer signed by a test wallet. Not OpenSea data; used
@@ -156,14 +158,7 @@ abstract contract Base is Test {
         }
     }
 
-    function listing(uint256 startAmount, uint256 endAmount, uint256 startTime, uint256 endTime, uint256 salt)
-        internal
-        returns (AdvancedOrder memory)
-    {
-        return signed(seller, components(startAmount, endAmount, startTime, endTime, salt));
-    }
-
-    function signed(Vm.Wallet memory w, OrderComponents memory c) internal returns (AdvancedOrder memory order) {
+    function signed(Vm.Wallet memory w, OrderComponents memory c) internal view returns (AdvancedOrder memory order) {
         order.parameters = OrderParameters(
             c.offerer,
             c.zone,
@@ -182,45 +177,20 @@ abstract contract Base is Test {
         order.signature = sign(w, SEAPORT.getOrderHash(c));
     }
 
-    function components(uint256 startAmount, uint256 endAmount, uint256 startTime, uint256 endTime, uint256 salt)
-        internal
-        view
-        returns (OrderComponents memory c)
-    {
-        c.offerer = seller.addr;
-        c.zone = address(market);
-        c.offer = new OfferItem[](1);
-        c.offer[0] = OfferItem(ItemType.ERC721, nft, tokenId, 1, 1);
-        c.consideration = new ConsiderationItem[](1);
-        c.consideration[0] =
-            ConsiderationItem(ItemType.ERC20, address(WETH), 0, startAmount, endAmount, payable(seller.addr));
-        c.orderType = OrderType.FULL_RESTRICTED;
-        c.startTime = startTime;
-        c.endTime = endTime;
-        c.salt = salt;
-        c.conduitKey = OS_CONDUIT_KEY;
-        c.counter = SEAPORT.getCounter(seller.addr);
+    /// Fixed-price WETH listing terms; seller, nft and tokenId come from the transfer.
+    function terms(uint256 floor) internal view returns (Market.Listing memory l) {
+        l.currency = address(WETH);
+        l.recipient = seller.addr;
+        l.floor = uint128(floor);
+        l.expiry = uint40(block.timestamp + 1 days);
+        l.price = Market.Price(uint128(floor), uint128(floor), 0, 0, address(0), 0);
     }
 
-    /// [listing NFT -> bid NFT], [bid WETH -> seller], [bid WETH -> each bid fee].
-    function fulfillments() internal view returns (Fulfillment[] memory f) {
-        uint256 n = bid().parameters.consideration.length;
-        f = new Fulfillment[](n + 1);
-        f[0] = pair(0, 0, 1, 0);
-        f[1] = pair(1, 0, 0, 0);
-        for (uint256 i = 1; i < n; i++) {
-            f[i + 1] = pair(1, 0, 1, i);
-        }
-    }
-
-    function pair(uint256 offerOrder, uint256 offerItem, uint256 considerationOrder, uint256 considerationItem)
-        internal
-        pure
-        returns (Fulfillment memory f)
-    {
-        f.offerComponents = new FulfillmentComponent[](1);
-        f.offerComponents[0] = FulfillmentComponent(offerOrder, offerItem);
-        f.considerationComponents = new FulfillmentComponent[](1);
-        f.considerationComponents[0] = FulfillmentComponent(considerationOrder, considerationItem);
+    function list(Market.Listing memory l) internal returns (uint256 id) {
+        vm.prank(seller.addr);
+        IERC721Safe(nft)
+            .safeTransferFrom(seller.addr, address(market), tokenId, abi.encodePacked(bytes1(0x00), abi.encode(l)));
+        id = market.lastId();
+        (l.seller, l.nft, l.tokenId) = (seller.addr, nft, tokenId);
     }
 }
