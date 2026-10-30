@@ -2,12 +2,12 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { eth } from "../ui/format";
-import { Art, getJson, hydrate, type Listing } from "../ui/parts";
+import { Art, getJson, hydrateListing, type Listing } from "../ui/parts";
 
 export default function Browse() {
   const { data, isPending, error } = useQuery({
     queryKey: ["listings"],
-    queryFn: async () => (await getJson<any[]>("/api/listings")).map(hydrate),
+    queryFn: async () => (await getJson<any[]>("/api/listings")).map(hydrateListing),
     refetchInterval: 30_000,
   });
   return (
@@ -36,7 +36,7 @@ export default function Browse() {
       )}
       {!!data?.length && (
         <div className="grid">
-          {data.map((l) => <Card key={l.hash} l={l} />)}
+          {data.map((l) => <Card key={l.id} l={l} />)}
         </div>
       )}
     </>
@@ -45,11 +45,11 @@ export default function Browse() {
 
 function Card({ l }: { l: Listing }) {
   return (
-    <Link href={`/l/${l.hash}`} className="card">
+    <Link href={`/l/${l.id}`} className="card">
       <Art nft={l.nft} size="card" />
       <div className="cap">
-        <span>{l.nft?.name ?? `#${l.components.offer[0].identifierOrCriteria}`}</span>
-        <span className="num">{l.state === "scheduled" ? "Soon" : `${eth(l.price)} ETH`}</span>
+        <span>{l.nft?.name ?? `#${l.listing.tokenId}`}</span>
+        <span className="num">{l.ask ? `${eth(l.ask)} ETH` : "-"}</span>
       </div>
       <div className="small muted">{l.nft?.collection}</div>
       <Track l={l} />
@@ -57,11 +57,12 @@ function Card({ l }: { l: Listing }) {
   );
 }
 
-/** How far the price has fallen toward the floor. */
+/** How far through the price window the listing is. */
 function Track({ l }: { l: Listing }) {
-  const { startTime: a, endTime: b } = l.components;
+  const { startTime: a, endTime: b } = l.listing.price;
   const t = Number(l.now);
-  const f = Math.min(1, Math.max(0, (t - Number(a)) / (Number(b) - Number(a))));
+  const span = Number(b) - Number(a);
+  const f = span <= 0 ? 1 : Math.min(1, Math.max(0, (t - Number(a)) / span));
   return (
     <div style={{ height: 1, background: "var(--faint)", marginTop: 10 }} aria-hidden>
       <div style={{ height: 1, width: `${f * 100}%`, background: "var(--fg)" }} />

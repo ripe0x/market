@@ -1,58 +1,54 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildListing, buyerTotal, listingProblem, matchSplit, minReleasedFor, priceAt, MARKET } from "./order";
+import { decodeAbiParameters } from "viem";
+import { askAt, bidPriceAt, builtinPrice, buyerPrice, fixedPrice, listData, sellData, type Bid, type Listing, type Price } from "./order";
 
-const base = {
-  seller: "0x00000000000000000000000000000000000000a1",
-  nft: "0x00000000000000000000000000000000000000b2",
-  tokenId: 7n,
-  start: 2n * 10n ** 18n,
-  floor: 10n ** 18n,
-  startTime: 1000n,
-  endTime: 1000n + 864000n,
-  counter: 0n,
-  salt: 1n,
-} as const;
+const addr = "0x00000000000000000000000000000000000000a1";
+const curve = (start: bigint, end: bigint): Price => ({ start, end, startTime: 1000, endTime: 1000 + 86400, strategy: "0x0000000000000000000000000000000000000000", data: `0x${"0".repeat(64)}` });
 
-test("price declines linearly, rounds up, and is null outside the window", () => {
-  const c = buildListing(base);
-  assert.equal(priceAt(c, 999n), null);
-  assert.equal(priceAt(c, 1000n), base.start);
-  assert.equal(priceAt(c, 1000n + 432000n), 15n * 10n ** 17n);
-  assert.equal(priceAt(c, base.endTime), null);
-  // 1 wei over 3 seconds rounds up, never below the exact value
-  const odd = buildListing({ ...base, start: 1n, floor: 0n, startTime: 0n, endTime: 3n });
-  assert.deepEqual([0n, 1n, 2n].map((t) => priceAt(odd, t)), [1n, 1n, 1n]);
+test("built-in price interpolates linearly and holds at the ends", () => {
+  const p = curve(2n * 10n ** 18n, 10n ** 18n);
+  assert.equal(builtinPrice(p, 999n, false), 2n * 10n ** 18n); // before start holds start
+  assert.equal(builtinPrice(p, 1000n + 86400n + 1n, false), 10n ** 18n); // after end holds end
+  assert.equal(builtinPrice(p, 1000n + 43200n, false), 15n * 10n ** 17n); // halfway
+  // A listing rounds up, a bid rounds down, so neither flatters its owner.
+  const odd = curve(3n, 0n);
+  odd.endTime = odd.startTime + 3;
+  assert.equal(builtinPrice(odd, BigInt(odd.startTime) + 1n, false), 2n);
+  assert.equal(builtinPrice(odd, BigInt(odd.startTime) + 1n, true), 2n);
 });
 
-test("price never increases", () => {
-  const c = buildListing({ ...base, start: 3n * 10n ** 18n + 7n, floor: 10n ** 18n - 3n, endTime: base.startTime + 604813n });
-  let last = priceAt(c, c.startTime)!;
-  for (let t = c.startTime; t < c.endTime; t += 997n) {
-    const p = priceAt(c, t)!;
-    assert.ok(p <= last);
-    last = p;
+test("ask never falls below the floor; strategy prices read null", () => {
+  const l: Listing = { seller: addr, nft: addr, tokenId: 1n, currency: addr, recipient: addr, floor: 15n * 10n ** 17n, expiry: 0, price: curve(2n * 10n ** 18n, 10n ** 18n) };
+  assert.equal(askAt(l, 1000n + 86400n), 15n * 10n ** 17n); // end 1.0 clamped up to floor 1.5
+  l.price = { ...l.price, strategy: "0x00000000000000000000000000000000000000ff" };
+  assert.equal(askAt(l, 1000n), null);
+});
+
+test("bid price is clamped to maxPrice", () => {
+  const b = { maxPrice: 10n ** 18n, price: curve(3n * 10n ** 18n, 3n * 10n ** 18n) } as Bid;
+  assert.equal(bidPriceAt(b, 2000n), 10n ** 18n);
+});
+
+test("buyerPrice grosses the ask up past the protocol fee", () => {
+  for (const ask of [1n, 10n ** 18n, 123456789012345678n]) {
+    const p = buyerPrice(ask);
+    assert.ok(p - (p * 20n) / 10_000n >= ask, "proceeds cover the ask");
   }
 });
 
-test("fees", () => {
-  assert.equal(buyerTotal(10n ** 18n), 10n ** 18n + 2n * 10n ** 15n);
-  const s = matchSplit(2n * 10n ** 18n);
-  assert.deepEqual(s, { executorFee: 6n * 10n ** 15n, protocolFee: 4n * 10n ** 15n, seller: 199n * 10n ** 16n });
-  for (const p of [1n, 999n, 10n ** 18n, 123456789012345678n]) {
-    const r = minReleasedFor(p);
-    assert.ok(matchSplit(r).seller >= p);
-    assert.ok(matchSplit(r - 1n).seller < p);
-  }
-});
+test("listData and sellData encode the structs Market decodes back", () => {
+  const price = fixedPrice(10n ** 18n);
+  const l: Listing = { seller: addr, nft: addr, tokenId: 7n, currency: addr, recipient: addr, floor: 10n ** 18n, expiry: 123, price };
+  const d = listData(l);
+  assert.equal(d.slice(0, 4), "0x00");
+  const [decoded] = decodeAbiParameters(
+    [{ type: "tuple", components: [{ name: "seller", type: "address" }, { name: "nft", type: "address" }, { name: "tokenId", type: "uint256" }, { name: "currency", type: "address" }, { name: "recipient", type: "address" }, { name: "floor", type: "uint128" }, { name: "expiry", type: "uint40" }, { name: "price", type: "tuple", components: [{ name: "start", type: "uint128" }, { name: "end", type: "uint128" }, { name: "startTime", type: "uint40" }, { name: "endTime", type: "uint40" }, { name: "strategy", type: "address" }, { name: "data", type: "bytes32" }] }] }],
+    `0x${d.slice(4)}`,
+  );
+  assert.equal((decoded as any).tokenId, 7n);
+  assert.equal((decoded as any).price.start, 10n ** 18n);
 
-test("listing shape checks", () => {
-  const c = buildListing(base);
-  assert.equal(c.zone, MARKET);
-  assert.equal(listingProblem(c), null);
-  assert.equal(listingProblem({ ...c, orderType: 0 }), "wrong order type");
-  assert.equal(listingProblem(buildListing({ ...base, start: 0n, floor: 0n })), "start price must be above zero");
-  assert.equal(listingProblem(buildListing({ ...base, floor: base.start + 1n })), "floor above start");
-  const other = { ...c, consideration: [{ ...c.consideration[0], recipient: "0x00000000000000000000000000000000000000c3" as const }] };
-  assert.equal(listingProblem(other), "proceeds must go to the seller");
+  const b: Bid = { buyer: addr, recipient: addr, nft: addr, minTokenId: 0n, maxTokenId: 5n, currency: addr, budget: 10n ** 18n, maxPrice: 10n ** 18n, quantity: 2, expiry: 99, price };
+  assert.equal(sellData(b, 3n, 10n ** 17n, addr).slice(0, 4), "0x01");
 });

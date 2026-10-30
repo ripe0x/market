@@ -1,13 +1,15 @@
 import type { Address, Hex } from "viem";
-import { WETH, toAdvancedOrder, type Components } from "../lib/order";
+import { WETH } from "../lib/order";
 
-export type Item = { itemType: number; token: Address; identifierOrCriteria: bigint; startAmount: bigint; endAmount: bigint; recipient?: Address };
-export type Bid = {
+// Typed Seaport order, ready to pass to Market.fillOffer.
+export type Item = { itemType: number; token: Address; identifierOrCriteria: bigint; startAmount: bigint; endAmount: bigint };
+export type ConsiderationItem = Item & { recipient: Address };
+export type Order = {
   parameters: {
     offerer: Address;
     zone: Address;
     offer: Item[];
-    consideration: (Item & { recipient: Address })[];
+    consideration: ConsiderationItem[];
     orderType: number;
     startTime: bigint;
     endTime: bigint;
@@ -21,54 +23,72 @@ export type Bid = {
   signature: Hex;
   extraData: Hex;
 };
+export type Resolver = { orderIndex: bigint; side: number; index: bigint; identifier: bigint; criteriaProof: Hex[] };
 
 const big = (x: unknown) => BigInt(x as string);
-const item = (x: any): Item => ({
-  itemType: Number(x.itemType),
-  token: x.token,
-  identifierOrCriteria: big(x.identifierOrCriteria),
-  startAmount: big(x.startAmount),
-  endAmount: big(x.endAmount),
-  ...(x.recipient ? { recipient: x.recipient } : {}),
-});
+const item = (x: any): Item => ({ itemType: Number(x.itemType), token: x.token, identifierOrCriteria: big(x.identifierOrCriteria), startAmount: big(x.startAmount), endAmount: big(x.endAmount) });
+const consideration = (x: any): ConsiderationItem => ({ ...item(x), recipient: x.recipient });
 
-/** OpenSea JSON (decimal strings) to typed AdvancedOrder. */
-export function parseBid(o: any, units = 1n): Bid {
+/** OpenSea JSON order (decimal strings) to a typed AdvancedOrder. */
+export function parseOrder(o: any): Order {
   const p = o.parameters;
-  // A multi-unit collection offer is filled one unit at a time.
-  const quantity = big(p.consideration[0].startAmount);
   return {
     parameters: {
       offerer: p.offerer,
       zone: p.zone,
       offer: p.offer.map(item),
-      consideration: p.consideration.map(item) as Bid["parameters"]["consideration"],
+      consideration: p.consideration.map(consideration),
       orderType: Number(p.orderType),
       startTime: big(p.startTime),
       endTime: big(p.endTime),
       zoneHash: p.zoneHash,
       salt: big(p.salt),
       conduitKey: p.conduitKey,
-      totalOriginalConsiderationItems: big(p.totalOriginalConsiderationItems),
+      totalOriginalConsiderationItems: p.totalOriginalConsiderationItems != null ? big(p.totalOriginalConsiderationItems) : BigInt(p.consideration.length),
     },
-    numerator: o.numerator != null ? big(o.numerator) : units,
-    denominator: o.denominator != null ? big(o.denominator) : quantity,
+    numerator: o.numerator != null ? big(o.numerator) : 1n,
+    denominator: o.denominator != null ? big(o.denominator) : 1n,
     signature: o.signature ?? "0x",
     extraData: o.extraData ?? "0x",
   };
 }
 
-// Seaport AmountDeriver: fraction first, then linear interpolation over time.
-function amount(i: Item, b: Bid, now: bigint, roundUp: boolean): bigint {
-  const { numerator: n, denominator: d } = b;
-  const frac = (x: bigint) => {
-    if ((x * n) % d !== 0n) throw new Error("inexact fraction");
-    return (x * n) / d;
-  };
+const parseResolver = (r: any): Resolver => ({ orderIndex: big(r.orderIndex), side: Number(r.side), index: big(r.index), identifier: big(r.identifier), criteriaProof: (r.criteriaProof ?? []) as Hex[] });
+
+/**
+ * OpenSea's `POST /offers/fulfillment_data` returns either a `fulfillAdvancedOrder`
+ * or a `matchAdvancedOrders` input_data shape. Both reduce to one signed offer order
+ * and the resolvers that point at it, as `fillOffer` wants (offer is order index 0).
+ *
+ * - fulfillAdvancedOrder: the offer is `advancedOrder`; resolvers already index 0.
+ * - matchAdvancedOrders: the offer is the order whose offerer is not the fulfiller
+ *   (the other order is the mirror OpenSea builds for the NFT side); keep only the
+ *   resolvers aimed at it and remap them to order index 0.
+ */
+export function normalizeFulfillment(input: any, fulfiller: Address): { order: Order; resolvers: Resolver[] } {
+  if (input.advancedOrder) {
+    return { order: parseOrder(input.advancedOrder), resolvers: (input.criteriaResolvers ?? []).map(parseResolver) };
+  }
+  if (Array.isArray(input.orders) && input.orders.length) {
+    const orders = input.orders as any[];
+    let idx = orders.findIndex((o) => o.parameters.offerer.toLowerCase() !== fulfiller.toLowerCase());
+    if (idx < 0) idx = 0;
+    const resolvers = (input.criteriaResolvers ?? [])
+      .map(parseResolver)
+      .filter((r: Resolver) => Number(r.orderIndex) === idx)
+      .map((r: Resolver) => ({ ...r, orderIndex: 0n }));
+    return { order: parseOrder(orders[idx]), resolvers };
+  }
+  throw new Error("unrecognized fulfillment_data shape");
+}
+
+// Seaport AmountDeriver: linear interpolation over time, applied per unit fraction.
+function amount(i: Item, o: Order, now: bigint, roundUp: boolean): bigint {
+  const frac = (x: bigint) => (x * o.numerator) / o.denominator;
   const s = frac(i.startAmount);
   const e = frac(i.endAmount);
   if (s === e) return e;
-  const { startTime, endTime } = b.parameters;
+  const { startTime, endTime } = o.parameters;
   const duration = endTime - startTime;
   const elapsed = now - startTime;
   const total = s * (duration - elapsed) + e * elapsed;
@@ -77,40 +97,25 @@ function amount(i: Item, b: Bid, now: bigint, roundUp: boolean): bigint {
 }
 
 /**
- * WETH the bid releases after its own mandatory consideration, i.e. what reaches
- * the seller side (seller amount plus surplus). Null if the bid is not a single
- * WETH offer for one ERC721 with only WETH fees.
+ * WETH the offer releases to Market after its own mandatory consideration (OpenSea
+ * fee, royalties), i.e. the sale price Market can keep. Null if the offer is not a
+ * single WETH offer with WETH-only fees, or is outside its time window.
  */
-export function released(b: Bid, now: bigint): bigint | null {
-  const { offer, consideration } = b.parameters;
+export function released(o: Order, now: bigint): bigint | null {
+  const { offer, consideration: c } = o.parameters;
   if (offer.length !== 1 || offer[0].itemType !== 1 || offer[0].token.toLowerCase() !== WETH.toLowerCase()) return null;
-  if (now < b.parameters.startTime || now >= b.parameters.endTime) return null;
-  let r = amount(offer[0], b, now, false);
-  for (const c of consideration.slice(1)) {
-    if (c.itemType !== 1 || c.token.toLowerCase() !== WETH.toLowerCase()) return null;
-    r -= amount(c, b, now, true);
+  if (now < o.parameters.startTime || now >= o.parameters.endTime) return null;
+  let r = amount(offer[0], o, now, false);
+  for (const k of c.slice(1)) {
+    if (k.itemType !== 1 || k.token.toLowerCase() !== WETH.toLowerCase()) return null;
+    r -= amount(k, o, now, true);
   }
   return r > 0n ? r : null;
 }
 
-const fc = (orderIndex: bigint, itemIndex: bigint) => ({ orderIndex, itemIndex });
-const pair = (a: [bigint, bigint], b: [bigint, bigint]) => ({ offerComponents: [fc(...a)], considerationComponents: [fc(...b)] });
-
-/** Arguments for Market.matchOffer over orders [listing, bid]. */
-export function matchArgs(listing: Components, signature: Hex, bid: Bid) {
-  const tokenId = listing.offer[0].identifierOrCriteria;
-  const nftWanted = bid.parameters.consideration[0];
-  const fulfillments = [pair([0n, 0n], [1n, 0n]), pair([1n, 0n], [0n, 0n])];
-  for (let i = 1n; i < BigInt(bid.parameters.consideration.length); i++) fulfillments.push(pair([1n, 0n], [1n, i]));
-  // Collection offer (criteria 0 = any token): resolve to this token, no proof.
-  const criteriaResolvers =
-    nftWanted.itemType === 4 ? [{ orderIndex: 1n, side: 1, index: 0n, identifier: tokenId, criteriaProof: [] as Hex[] }] : [];
-  return [toAdvancedOrder(listing, signature), bid, criteriaResolvers, fulfillments] as const;
-}
-
 /**
- * Fees for a same-nonce replacement: double today's estimate, but never less
- * than 115% of what was last sent, or nodes reject it as underpriced.
+ * Fees for a same-nonce replacement: double today's estimate, but never less than
+ * 115% of what was last sent, or nodes reject it as underpriced (D022).
  */
 export function replacementFees(now: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }, last: { maxFee?: string; tip?: string }) {
   const atLeast = (x: bigint, prev?: string) => {

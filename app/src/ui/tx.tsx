@@ -13,14 +13,17 @@ export type TxState =
 
 // Plain messages for reverts a user can actually hit.
 const reasons: Record<string, string> = {
-  NotListing: "This listing is not open.",
-  InsufficientPayment: "Price changed. Try again.",
-  NftNotDelivered: "Offer did not take the NFT.",
-  NotWethOffer: "Offer is not in WETH.",
-  OrderAlreadyFilled: "Already sold.",
-  OrderIsCancelled: "This listing was cancelled.",
-  InvalidTime: "This listing is not open.",
-  InvalidSigner: "Signature does not match.",
+  NotActive: "This order is not open.",
+  NotEligible: "This NFT is not eligible for that bid.",
+  PriceAboveLimit: "Price moved above your limit. Try again.",
+  ProceedsBelowMinimum: "The offer no longer covers the minimum.",
+  Incompatible: "This offer cannot settle here.",
+  CurrencyDisabled: "This currency is not enabled.",
+  PaymentFailed: "Payment failed. Check your balance.",
+  NftNotDelivered: "The NFT did not transfer.",
+  InvalidTerms: "These terms are not valid.",
+  Unauthorized: "Not allowed from this wallet.",
+  StrategyFailed: "The pricing strategy reverted.",
 };
 
 export function errorMessage(e: unknown): string {

@@ -90,8 +90,12 @@ export function supported(o: RawOffer, nftContract: Address): boolean {
   return p.consideration.slice(1).every((c: any) => c.itemType === 1 && c.token.toLowerCase() === WETH.toLowerCase());
 }
 
-/** Signed bid plus zone extraData that names `fulfiller` (the Market contract). Needs an API key. */
-export async function fulfillment(o: RawOffer, fulfiller: Address, nftContract: Address, tokenId: string) {
+/**
+ * Raw fulfillment input_data OpenSea signs for `fulfiller` (the Market contract),
+ * carrying the zone extraData that names it. Either a `fulfillAdvancedOrder` or a
+ * `matchAdvancedOrders` shape; the keeper normalizes both. Needs an API key.
+ */
+export async function fulfillmentData(o: RawOffer, fulfiller: Address, nftContract: Address, tokenId: string): Promise<any> {
   const r = await get("/offers/fulfillment_data", {
     method: "POST",
     body: JSON.stringify({
@@ -102,6 +106,6 @@ export async function fulfillment(o: RawOffer, fulfiller: Address, nftContract: 
     }),
   });
   const input = r.fulfillment_data.transaction.input_data;
-  if (!input.orders?.length) throw new Error(`unexpected fulfillment shape: ${r.fulfillment_data.transaction.function}`);
-  return { order: input.orders[0], criteriaResolvers: (input.criteriaResolvers ?? []) as any[] };
+  if (!input.advancedOrder && !input.orders?.length) throw new Error(`unexpected fulfillment shape: ${r.fulfillment_data.transaction.function}`);
+  return input;
 }

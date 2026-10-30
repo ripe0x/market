@@ -5,24 +5,20 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { mainnet } from "wagmi/chains";
-import { fromJson, priceAt, type Components } from "../../lib/order";
+import { askAt, bidFromJson, bidPriceAt, listingFromJson, type Bid as BidTerms, type Listing as ListingTerms, type Price } from "../../lib/order";
 import { short } from "./format";
 import { devAccounts } from "./providers";
 
 export type Nft = { contract: string; tokenId: string; name: string; collection: string; image: string | null };
-export type Listing = {
-  hash: string;
-  components: Components;
-  signature: `0x${string}`;
-  state: "scheduled" | "active" | "expired" | "cancelled" | "sold" | "unavailable";
-  reason?: string;
-  price: string | null;
-  now: string;
-  nft?: Nft;
-};
+export type ListingState = "active" | "expired" | "cancelled" | "sold" | "withdrawn";
+export type BidState = "active" | "expired" | "filled" | "cancelled" | "withdrawn";
 
-/** API JSON carries bigints as strings. */
-export const hydrate = (l: any): Listing => ({ ...l, components: fromJson(JSON.stringify(l.components)) });
+export type Listing = { id: number; listing: ListingTerms; state: ListingState; ask: string | null; now: string; nft?: Nft };
+export type Bid = { id: number; bid: BidTerms; state: BidState; price: string | null; spent: string; fills: number; now: string; nft?: Nft };
+
+/** API JSON carries bigints as strings; rebuild the typed terms. */
+export const hydrateListing = (l: any): Listing => ({ ...l, listing: listingFromJson(l.listing) });
+export const hydrateBid = (b: any): Bid => ({ ...b, bid: bidFromJson(b.bid) });
 
 export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -38,6 +34,7 @@ export function Header() {
   const path = usePathname();
   const nav = [
     ["/", "Browse"],
+    ["/bids", "Bids"],
     ["/sell", "Sell"],
     ["/me", "Yours"],
   ];
@@ -83,7 +80,6 @@ export function Wallet() {
         {short(address)}
       </button>
     );
-  // Injected wallets announce themselves (EIP-6963); dev accounts appear only on a local fork.
   const options = connectors.filter((c) => c.id !== "injected" || connectors.length === 1);
   return (
     <div style={{ position: "relative" }}>
@@ -128,63 +124,70 @@ export function Art({ nft, size }: { nft?: Nft; size?: "card" }) {
 export function useNft(contract?: string, tokenId?: string) {
   return useQuery({
     queryKey: ["nft", contract, tokenId],
-    queryFn: () => getJson<Nft>(`/api/nft?contract=${contract}&id=${tokenId}`),
+    queryFn: () => getJson<Nft & { owner: string | null }>(`/api/nft?contract=${contract}&id=${tokenId}`),
     enabled: !!contract && !!tokenId,
     staleTime: 10 * 60_000,
   });
 }
 
-/** Ticks the listing price every second from the server's chain time. */
-export function useLivePrice(l?: Listing) {
+/** Ticks a built-in price (ask for a listing, payment for a bid) each second from the server's chain time. */
+export function useLiveNow(now?: string) {
   const [t, setT] = useState(0);
   useEffect(() => {
-    if (!l) return;
+    if (!now) return;
     const start = Date.now();
     setT(0);
     const id = setInterval(() => setT(Math.floor((Date.now() - start) / 1000)), 1000);
     return () => clearInterval(id);
-  }, [l?.now, l?.hash]);
-  if (!l) return { now: 0n, price: null as bigint | null };
-  const now = BigInt(l.now) + BigInt(t);
-  return { now, price: priceAt(l.components, now) };
+  }, [now]);
+  return now ? BigInt(now) + BigInt(t) : 0n;
 }
 
-const stateLabel: Record<Listing["state"], string> = {
-  scheduled: "Starts soon",
-  active: "Live",
-  expired: "Ended",
-  cancelled: "Cancelled",
-  sold: "Sold",
-  unavailable: "Paused",
-};
-export const State = ({ state }: { state: Listing["state"] }) => (
+export function useListingAsk(l?: Listing) {
+  const now = useLiveNow(l?.now);
+  if (!l) return { now: 0n, ask: null as bigint | null };
+  return { now, ask: askAt(l.listing, now) };
+}
+
+const listingLabel: Record<ListingState, string> = { active: "Live", expired: "Ended", cancelled: "Cancelled", sold: "Sold", withdrawn: "Withdrawn" };
+const bidLabel: Record<BidState, string> = { active: "Live", expired: "Ended", filled: "Filled", cancelled: "Cancelled", withdrawn: "Withdrawn" };
+export const State = ({ state }: { state: ListingState | BidState }) => (
   <span className="pill" data-state={state}>
-    {stateLabel[state]}
+    {(listingLabel as any)[state] ?? (bidLabel as any)[state]}
   </span>
 );
 
-/** Start-to-floor line over the listing window with a marker at now. */
-export function Curve({ c, now }: { c: Components; now: bigint }) {
+/** Price line over the order window with a marker at now. */
+export function Curve({ price, now, isBid = false }: { price: Price; now: bigint; isBid?: boolean }) {
   const W = 600;
   const H = 160;
-  const s = Number(c.consideration[0].startAmount);
-  const e = Number(c.consideration[0].endAmount);
-  const t0 = Number(c.startTime);
-  const t1 = Number(c.endTime);
-  const x = (t: number) => ((Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0)) * W;
-  const y = (v: number) => (s === 0 ? H : H - (v / s) * (H - 8) - 4);
+  const s = Number(price.start);
+  const e = Number(price.end);
+  const t0 = Number(price.startTime);
+  const t1 = Number(price.endTime);
+  const external = price.strategy !== "0x0000000000000000000000000000000000000000";
+  const hi = Math.max(s, e, 1);
+  const x = (t: number) => (t1 <= t0 ? 0 : ((Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0)) * W);
+  const y = (v: number) => H - (v / hi) * (H - 8) - 4;
+  const at = (t: number) => {
+    if (t1 <= t0 || t >= t1) return e;
+    if (t <= t0) return s;
+    const frac = (t - t0) / (t1 - t0);
+    return s + (e - s) * frac;
+  };
   const n = Number(now);
-  const p = priceAt(c, now);
+  if (external)
+    return (
+      <div className="small muted" style={{ padding: "20px 0" }}>
+        External pricing strategy. The on-chain quote is the live figure.
+      </div>
+    );
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Price over time" style={{ display: "block", overflow: "visible" }}>
       <line x1={0} y1={H} x2={W} y2={H} stroke="var(--faint)" />
       <line x1={0} y1={y(s)} x2={W} y2={y(e)} stroke="var(--fg)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-      {p !== null && (
-        <>
-          <line x1={x(n)} y1={y(Number(p))} x2={x(n)} y2={H} stroke="var(--fg)" strokeDasharray="2 3" />
-          <rect x={x(n) - 4} y={y(Number(p)) - 4} width={8} height={8} fill="var(--fg)" />
-        </>
-      )}
+      <line x1={x(n)} y1={y(at(n))} x2={x(n)} y2={H} stroke="var(--fg)" strokeDasharray="2 3" />
+      <rect x={x(n) - 4} y={y(at(n)) - 4} width={8} height={8} fill="var(--fg)" />
     </svg>
   );
 }
@@ -195,8 +198,8 @@ export function Footer() {
   return (
     <footer className="foot">
       <div className="wrap">
-        <span>Prices in ETH. Sellers are paid in WETH.</span>
-        <span>Offer matching {live && data?.matching === "on" ? "on" : "off"}</span>
+        <span>Prices in ETH. Settled in WETH.</span>
+        <span>Keeper {live && data?.matching === "on" ? "on" : "off"}</span>
       </div>
     </footer>
   );

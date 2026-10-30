@@ -34,5 +34,11 @@ export async function metadata(contract: Address, tokenId: string): Promise<os.N
   return nft;
 }
 
-export const withNft = <T extends { components: { offer: { token: Address; identifierOrCriteria: bigint }[] } }>(ls: T[]) =>
-  Promise.all(ls.map(async (l) => ({ ...l, nft: await metadata(l.components.offer[0].token, l.components.offer[0].identifierOrCriteria.toString()) })));
+/** Attach token metadata. `pick` returns the contract and a representative token id. */
+export const withNft = <T>(items: T[], pick: (x: T) => { nft: Address; tokenId: bigint }) =>
+  Promise.all(
+    items.map(async (x) => {
+      const { nft, tokenId } = pick(x);
+      return { ...x, nft: await metadata(nft, tokenId.toString()) };
+    }),
+  );

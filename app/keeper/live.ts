@@ -1,19 +1,28 @@
-// Live OpenSea fulfiller check on an anvil fork of the latest mainnet block.
-// Market is deployed at a fresh address, a throwaway seller lists a real NFT, and
-// the keeper's production path asks OpenSea for zone data naming that address,
-// then simulates and submits the match. Nothing leaves the fork except API reads.
+// Live OpenSea fulfiller check on an anvil fork of the latest mainnet block, for the
+// escrow design. Market is deployed at a fresh address, a throwaway seller deposits a
+// real NFT into it, and the keeper's production path asks OpenSea for zone data naming
+// Market as fulfiller.
+//
+// EXPECTED BLOCKER: OpenSea signs fulfillment data only for the NFT's current *mainnet*
+// owner. On a fork, Market owns the NFT but mainnet still shows the original holder, so
+// OpenSea refuses to sign for Market. This script therefore cannot complete a fill on a
+// fork; it is the mainnet canary's script (D023, STATUS.md blocker 1): only a real
+// low-value deposit on mainnet, with explicit owner authorization, can prove OpenSea
+// signs for Market's deployed address. Run it to confirm the request path and see the
+// exact OpenSea response.
 //   OPENSEA_API_KEY=... npm run live:fulfiller -- <nft> <tokenId>
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTestClient, createWalletClient, encodeDeployData, http, parseAbi, publicActions, type Address, type Hex } from "viem";
+import { createTestClient, createWalletClient, encodeDeployData, http, parseAbi, publicActions, type Address } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { mainnet } from "viem/chains";
+import type { Listing } from "../lib/order";
 
-const [nft, tokenIdArg] = process.argv.slice(2) as [Address, string];
-assert.ok(nft && tokenIdArg, "usage: live.ts <nft> <tokenId>");
+const [nftArg, tokenIdArg] = process.argv.slice(2) as [Address, string];
+assert.ok(nftArg && tokenIdArg, "usage: live.ts <nft> <tokenId>");
 assert.ok(process.env.OPENSEA_API_KEY, "OPENSEA_API_KEY is required");
 const tokenId = BigInt(tokenIdArg);
 
@@ -36,15 +45,16 @@ for (let i = 0; ; i++) {
 }
 const forkBlock = await test.getBlockNumber();
 
-// Deploy before importing lib/, which reads the Market address from env at import time.
+// Deploy Market before importing lib/, which reads the Market address from env at import.
 const keeperKey = generatePrivateKey();
 const keeper = privateKeyToAccount(keeperKey);
 const seller = privateKeyToAccount(generatePrivateKey());
 const protocol = privateKeyToAccount(generatePrivateKey()).address;
 for (const a of [seller.address, keeper.address]) await test.setBalance({ address: a, value: 10n ** 18n });
+const OS_ZONE = "0x000056F7000000EcE9003ca63978907a00FFD100";
 const artifact = JSON.parse(readFileSync(join(root, "out/Market.sol/Market.json"), "utf8"));
 const deployTx = await createWalletClient({ account: keeper, chain: mainnet, transport: http(rpc) }).sendTransaction({
-  data: encodeDeployData({ abi: artifact.abi, bytecode: artifact.bytecode.object, args: [protocol] }),
+  data: encodeDeployData({ abi: artifact.abi, bytecode: artifact.bytecode.object, args: [protocol, protocol, OS_ZONE] }),
 });
 const market = (await test.waitForTransactionReceipt({ hash: deployTx })).contractAddress!;
 Object.assign(process.env, {
@@ -53,88 +63,50 @@ Object.assign(process.env, {
   DB_PATH: join(dir, "live.db"),
   KEEPER_PRIVATE_KEY: keeperKey,
   CONFIRMATIONS: "0",
-  PROFIT_MARGIN: "0", // feasibility is measured in ECONOMICS.md; this checks the integration
+  PROFIT_MARGIN: "0",
   START_BLOCK: String(forkBlock),
 });
 
-const { WETH, OS_CONDUIT, buildListing, seaportDomain, orderTypes, seaportAbi, erc721Abi, matchSplit, toJson } = await import("../lib/order");
-const { db } = await import("../lib/server");
+const { WETH, erc721Abi, listData, fixedPrice } = await import("../lib/order");
 const os = await import("../lib/opensea");
 const { round } = await import("./run");
-const { parseBid, released } = await import("./match");
 
-// Move the NFT from its current holder to the throwaway seller.
-const owner = await test.readContract({ address: nft, abi: erc721Abi, functionName: "ownerOf", args: [tokenId] });
+// Move the NFT to the throwaway seller, then deposit it into Market.
+const owner = await test.readContract({ address: nftArg, abi: erc721Abi, functionName: "ownerOf", args: [tokenId] });
 await test.impersonateAccount({ address: owner });
 await test.setBalance({ address: owner, value: 10n ** 18n });
 await createWalletClient({ account: owner, chain: mainnet, transport: http(rpc) }).writeContract({
-  address: nft,
+  address: nftArg,
   abi: parseAbi(["function transferFrom(address,address,uint256)"]),
   functionName: "transferFrom",
   args: [owner, seller.address, tokenId],
 });
 await test.stopImpersonatingAccount({ address: owner });
-await createWalletClient({ account: seller, chain: mainnet, transport: http(rpc) }).writeContract({
-  address: nft,
-  abi: erc721Abi,
-  functionName: "setApprovalForAll",
-  args: [OS_CONDUIT, true],
-});
 
-// Price the listing under the live best offer so a match is possible.
-const best = await os.bestOffer(await os.collectionSlug(nft), tokenId.toString());
-assert.ok(best, "no OpenSea offer for this NFT");
-assert.ok(os.supported(best, nft), "best offer is not a supported WETH offer");
 const now = (await test.getBlock()).timestamp;
-const headline = released(parseBid({ ...best.protocol_data, signature: "0x", extraData: "0x" }), now);
-assert.ok(headline, "offer releases nothing");
-const listing = buildListing({
-  seller: seller.address,
-  nft,
-  tokenId,
-  start: (headline * 95n) / 100n,
-  floor: (headline * 80n) / 100n,
-  startTime: now - 3600n,
-  endTime: now + 3600n,
-  counter: 0n,
-  salt: 1n,
+const listing: Listing = { seller: seller.address, nft: nftArg, tokenId, currency: WETH, recipient: seller.address, floor: 10n ** 15n, expiry: Number(now) + 86400, price: fixedPrice(10n ** 15n) };
+await createWalletClient({ account: seller, chain: mainnet, transport: http(rpc) }).writeContract({
+  address: nftArg,
+  abi: erc721Abi,
+  functionName: "safeTransferFrom",
+  args: [seller.address, market, tokenId, listData(listing)],
 });
-const signature = await seller.signTypedData({ domain: seaportDomain, types: orderTypes, primaryType: "OrderComponents", message: listing });
-const { POST } = await import("../src/app/api/listings/route");
-const res = await POST(new Request("http://x/api/listings", { method: "POST", body: JSON.stringify({ components: JSON.parse(toJson(listing)), signature }) }));
-assert.equal(res.status, 201, JSON.stringify(await res.json()));
+assert.equal((await test.readContract({ address: nftArg, abi: erc721Abi, functionName: "ownerOf", args: [tokenId] })).toLowerCase(), market.toLowerCase(), "escrowed in Market");
 
-// Round 1 fetches zone data for `market`, simulates and submits; round 2 records it.
+// Ask OpenSea for zone data naming Market as fulfiller. This is the canary step.
+const slug = await os.collectionSlug(nftArg);
+const best = await os.bestOffer(slug, tokenId.toString());
+console.log(JSON.stringify({ step: "setup", forkBlock: forkBlock.toString(), market, nft: nftArg, tokenId: tokenId.toString(), bestOffer: best?.order_hash ?? null }));
+if (best && os.supported(best, nftArg)) {
+  try {
+    await os.fulfillmentData(best, market, nftArg, tokenId.toString());
+    console.log(JSON.stringify({ step: "fulfillment_data", ok: true, note: "OpenSea signed for Market; on mainnet a fill could proceed" }));
+  } catch (e: any) {
+    console.log(JSON.stringify({ step: "fulfillment_data", ok: false, blocker: "OpenSea will not sign for Market's address on a fork (checks mainnet ownership)", error: String(e?.message ?? e).slice(0, 300) }));
+  }
+}
+
+// The production round runs the same path end to end; on a fork it stops at the OpenSea request.
 await round();
-const attempt = db().prepare("select * from attempts").get() as any;
-assert.ok(attempt, "keeper did not submit; see the log lines above");
-const receipt = await test.waitForTransactionReceipt({ hash: attempt.tx as Hex });
-assert.equal(receipt.status, "success");
-await round();
-
-const wethBalance = (a: Address) =>
-  test.readContract({ address: WETH, abi: parseAbi(["function balanceOf(address) view returns (uint256)"]), functionName: "balanceOf", args: [a] });
-const newOwner = await test.readContract({ address: nft, abi: erc721Abi, functionName: "ownerOf", args: [tokenId] });
-assert.equal(newOwner.toLowerCase(), best.protocol_data.parameters.offerer.toLowerCase());
-assert.equal(await wethBalance(market), 0n);
-const got = { seller: await wethBalance(seller.address), executorFee: await wethBalance(keeper.address), protocolFee: await wethBalance(protocol) };
-// The three payouts sum to what the signed offer released; the split must be exact.
-assert.deepEqual(matchSplit(got.seller + got.executorFee + got.protocolFee), got);
-const sale = db().prepare("select * from sales").get() as any;
-assert.equal(BigInt(sale.seller_proceeds), got.seller);
-
-console.log(
-  JSON.stringify({
-    ok: true,
-    forkBlock: forkBlock.toString(),
-    market,
-    nft,
-    tokenId: tokenId.toString(),
-    offer: best.order_hash,
-    tx: attempt.tx,
-    gasUsed: receipt.gasUsed.toString(),
-    headline: headline.toString(),
-    ...Object.fromEntries(Object.entries(got).map(([k, v]) => [k, v.toString()])),
-  }),
-);
+console.log(JSON.stringify({ step: "round_done", note: "keeper round completed; see DEV notes in this file for the mainnet canary" }));
 process.exit(0);
