@@ -1,59 +1,59 @@
 # Security
 
-**Not audited.** Passing tests and an internal review do not make this safe. A qualified independent audit is required before any deployment that holds value.
+**Not audited.** Passing tests and an internal review do not make this safe. Market holds users' NFTs and bid budgets, so a qualified independent audit is required before any deployment that holds value.
 
 ## Permissions
 
 | Actor | Can | Cannot |
 | --- | --- | --- |
-| Seller | Sign a listing; cancel it with `Seaport.cancel` or `incrementCounter`; revoke the conduit approval | Be paid less than the current price |
-| Buyer | `Market.buy` at the current price plus 0.2% | Buy below the current price; buy a cancelled, expired, filled or unapproved listing |
-| Executor (anyone) | `Market.matchOffer` with any WETH offer that covers the price plus fees; earns 0.3% | Keep surplus; leave the NFT or WETH in Market; fill without the seller's signature |
-| Protocol | Receives 0.2% at a fixed address | Change fees, pause, upgrade, move user assets, alter a signed listing |
-| Market contract | Call Seaport as fulfiller inside `buy` and `matchOffer` | Act outside those calls: it signs nothing, implements no ERC-1271 or zone hook, and holds no user approvals |
-| Keeper service | Submit matches; record sales | Affect settlement rules; a dead keeper blocks nothing |
+| Seller | Deposit an NFT with terms (only as the owner itself); update terms; cancel; withdraw to any address | Be paid less than the ask on any fill |
+| Buyer | `buy` at the quoted price within `maxPrice`; create, cancel and withdraw bids | Pay more than `maxPrice`, or more than a bid's `maxPrice`, budget or quantity |
+| Holder | Sell into a bid with a `minProceeds` bound | Be paid without delivering an eligible NFT |
+| Executor (anyone) | `matchBid`, `fillOffer`; earns 0.30% | Keep surplus; spend other users' escrow; move any NFT but the listed one |
+| Owner | Enable currencies and OpenSea zones; transfer the role | Move assets, change fees or orders, pause, upgrade, block withdrawals |
+| Strategy contract | Return a price (read-only, 100k gas) | Move the price outside the order's bounds; block withdrawals |
+| Collection | Set ERC-2981 royalty; receive `onMarketSale` (100k gas, no value) | Reenter Market; undo a sale |
+| Keeper service | Submit fills; index events | Affect settlement rules; a dead keeper blocks nothing |
 
-Approvals: sellers approve the OpenSea conduit (`setApprovalForAll`). That approval is shared with OpenSea listings and survives cancellation. Market's only approval is its own WETH allowance to Seaport, set in the constructor.
+Approvals: users give Market no NFT approvals. ERC20 currencies need an allowance to Market for `buy` or `createBid` unless paying ETH. Market approves Seaport only inside `fillOffer`: the one listed token and the exact currency consideration, reset afterwards.
 
 ## Properties and how they are checked
 
 | Property | Mechanism | Tests |
 | --- | --- | --- |
-| Only Market fills its listings | Seaport calls the zone unless the caller is the zone; Market has no zone hook | `test_listingOnlyFillableThroughMarket` |
-| Seller gets at least the current price | Seaport consideration item to the seller | `test_revertWhenOfferBelowMinimumPlusFees`, fuzz `testFuzz_priceMatchesSeaport` |
-| Seller gets all surplus minus 0.5% | Unspent offer WETH goes to Market; split in the same call; checked subtraction reverts if fees exceed surplus | `test_matchRealOffer` (both real offers), `test_syntheticMatchSplitsSurplus` |
-| Price never increases, equals Seaport to the wei | Same AmountDeriver formula, rounding up | `testFuzz_priceNeverIncreases`, `testFuzz_priceMatchesSeaport` |
-| One fill per listing; replay fails | Seaport order status | `test_revertOnSecondBuy`, `test_revertOnReplayEvenIfSellerReacquires`, replay in `test_matchRealOffer` |
-| Cancel is binding without our service | Seaport `cancel`, `incrementCounter` | `test_revertWhenCancelled`, `test_revertWhenCounterIncremented`, UI cancel on fork |
-| Atomic; nothing left in Market | Single Seaport call; NFT-left check; WETH swept; overpayment returned as WETH | `test_revertWhenNftLeftInMarket`, balance assertions in all fills |
-| Only WETH offers | Offer shape check | `test_revertWhenOfferNotWeth` |
-| Reentrancy | Transient lock on both entry points; Seaport's own guard | `test_reentryDuringSettlementReverts` |
-| Signature binding | Seaport EIP-712 over all terms, chain id and Seaport address; zone address binds fee terms | `test_revertWhenSignatureWrong`, `test_revertWhenFulfillerDiffers` |
-| Ownership and approval changes stop fills | Conduit transfer fails | `test_revertWhenSellerNoLongerOwns`, `test_revertWhenSellerRevokedApproval` |
-| Offer-side failures revert both legs | Single Seaport match | `test_revertWhenBidderLacksWeth`, `test_revertWhenZoneSignatureExpired` |
-| API stores only valid, owned, signed listings | Signature (EOA or ERC-1271), counter, ownership, shape checks | `npm run e2e:keeper`: bad signature, non-owner, wrong zone, stale counter rejected; valid stored |
+| Escrow solvency: Market's balance equals the unspent budgets of open bids | Full budget deposited at creation; delta-checked deposits; balance check on `fillOffer` | `invariant_escrowEqualsOpenBudgets`, `test_revertWhenOfferWouldSpendEscrow`, `test_rejectFeeOnTransferToken` |
+| Custody: an escrowed NFT has exactly one open listing, and leaves only to a buyer or the seller's withdrawal address | Hash per order; delete before external calls; token-level Seaport approval; delivery check | `invariant_custodyMatchesListings`, `test_revertWhenOfferAsksForAnotherNft` |
+| Seller gets at least the ask | Checked after royalty and fees on every path | `test_listEscrowsAndBuyPaysEveryone`, `test_matchRevertsBelowAsk`, `test_revertWhenAskAboveProceeds`, handler asserts |
+| Buyer pays at most its bound | `maxPrice` on `buy`; bid price clamped to `maxPrice` and unspent budget | `test_buyRespectsMaxPrice`, `test_budgetAndQuantityBound`, handler asserts |
+| Bids never exceed budget, quantity or `maxPrice` under any interleaving | `spent` and `fills` update in the fill, under one lock | `test_quantityBound`, `test_bidStrategyUsesFills`, invariant handler |
+| Gross-up is exact enough | Iterated to cover the ask; within 4 wei of exact | `testFuzz_buyQuoteIsNearMinimal` (2,000 runs), `test_nonProportionalRoyaltyStillCoversAsk` |
+| Built-in price monotone and rounds toward the owner | Linear interpolation, up for asks, down for bids | `testFuzz_linearAsk` |
+| Strategy output bounded; failing strategy blocks only fills | Clamp; `staticcall` with gas limit | `test_externalStrategyIsClampedToFloor` |
+| Cancel is independent of transfers | `cancelListing` changes state only | `test_cancelWithdrawAndFailedTransfer` |
+| Disabled currency keeps withdrawals | Fills check the allowlist; withdrawals do not | `test_disabledCurrencyStopsFillsNotWithdrawals` |
+| Owner cannot touch assets | Only `setCurrency`, `setZone`, `setOwner` exist | `test_onlyOwnerConfigures`, `test_onlyOwnerSetsZones` |
+| Deposits only by the owner, with real delivery | `operator == from`; `ownerOf` check | `test_rejectsBadDeposits`, `test_fakeDeliveryIsRejected` |
+| Callbacks cannot undo a sale or be starved | ERC-165 opt-in; fixed gas; result ignored; gas floor | `test_failingObserversCannotUndoSale`, `test_executorCannotStarveObserver` |
+| Reentrancy | Transient lock on every state-changing entry point, including the deposit hook | `test_failingObserversCannotUndoSale` (reentrant observer) |
+| Real OpenSea offers settle exactly from escrow | `fulfillAdvancedOrder` with Market as fulfiller | `test_fillRealOffer` (both fixtures) |
+| Replay and expiry | Order hash deleted on fill; expiry checked; OpenSea zone signature expiry | `test_fillRealOffer` replay, `test_revertWhenZoneSignatureExpired` |
+| Only enabled zones | Zone allowlist | `test_revertWhenZoneDisabled` |
 
 ## Known risks
 
-1. **Surplus can be taken by arbitrage.** Anyone may buy at the current price and sell into a higher offer themselves. This is inherent to a public declining price.
-2. **Executor fee can be front-run.** A keeper transaction's calldata works for any caller (the zone signature names Market, not the keeper). The seller is unaffected; the keeper loses its fee. The keeper refuses to match on mainnet without `SUBMIT_RPC_URL` (a private relay).
-3. **Old listings revive if the seller reacquires the NFT** before the listing ends and the conduit approval is still on. Cancel to prevent.
-4. **OpenSea dependency.** OpenSea refuses zone signatures unless the fulfiller owns the NFT (D023), so live matching does not work in this design. Any design also depends on OpenSea not blocking the fulfiller address and on its API's availability and rate limits.
-5. **Stray WETH sent to Market** is paid to the next matched seller. Nothing else can withdraw it.
-6. **Operator-restricted (ERC721-C) collections** are untested.
-7. **No pause.** A bug fix needs a new deployment, and sellers must cancel old listings.
-8. **Metadata is untrusted.** Only http(s)/ipfs image URLs pass; names are trimmed text rendered as text.
+1. **Custody.** Market holds NFTs and bid budgets. A contract bug could lose them. There is no pause and no admin rescue by design; a fix needs a new deployment, and users must withdraw from the old one.
+2. **OpenSea may refuse Market's address** ("Account can not perform trading operations"). 2 of 48 contracts were refused in research. Only a mainnet canary can prove it. If refused, Market still works for direct buys and Market bids.
+3. **OpenSea dependency.** Offer discovery and zone signatures depend on OpenSea's API, rate limits and policies. A new OpenSea zone needs the owner to enable it.
+4. **Executor fee front-running.** `fillOffer` and `matchBid` calldata works for any caller; the seller is unaffected, the keeper loses its fee. The keeper requires a private submission endpoint off a local fork.
+5. **Arbitrage takes surplus** (D025): anyone can buy at the ask and resell higher.
+6. **Royalty choices** (D032): ERC-2981 only on native sales; OpenSea fills pay what OpenSea's offer pays. A collection can make its tokens unsellable on Market by setting a royalty above the price.
+7. **Stray assets.** An NFT sent with plain `transferFrom`, or tokens sent directly, have no order and cannot be withdrawn by anyone.
+8. **Currency risk.** An enabled token that later changes behavior (rebasing, fees, pausing, blocklists) can block fills or withdrawals in that token. A blocklisted royalty receiver or protocol recipient blocks sales in that token.
+9. **ERC721 variants.** Tokens without `safeTransferFrom` hooks cannot be listed. Operator-restricted collections (ERC721-C) are untested; their validators may block Market or Seaport.
+10. **External strategies** are third-party code and may be mutable. Bounds are the only guarantee.
+11. **Wash trades.** Anyone can sell to themselves at any price; `onMarketSale` observers must not treat Market sale prices as trustworthy market data.
+12. **Metadata is untrusted.** Only http(s)/ipfs image URLs pass; names are trimmed text rendered as text.
 
 ## Review findings
 
-Independent AI review of commit `2018970` (not a human audit), scope: `Market.sol`, listing intake API, keeper. Reviewer tests: `test/review/Review.t.sol` (4/4 pass).
-
-| # | Severity | Finding | Resolution |
-| --- | --- | --- | --- |
-| 1 | Medium | Keeper submitted to the public mempool when `SUBMIT_RPC_URL` was unset, so its executor fee could be front-run | Fixed: off a local fork, matching stays off without a private submission endpoint |
-| 2 | Low | Stray WETH sent to Market is paid to the next matched seller; the contract comment claimed Market never holds WETH | Accepted and documented (risk 5). Not profitable to anyone but the seller; comment corrected |
-| 3 | Low | Stuck-tx replacement could be underpriced after a base fee drop, stalling the keeper | Fixed: replacement fees are at least 115% of the last send (`replacementFees`, unit tested) |
-| 4 | Info | A searcher can buy at the current price and resell into a higher offer | By design (D013); risk 1 |
-| 5 | Info | Attacker-supplied consideration, resolvers and fulfillments cannot skim surplus | Confirmed by `test_cannotRouteSurplusToExecutorViaFulfillments`, `test_extraFulfillmentCannotSkimSurplus` |
-
-No critical or high findings. Not tested by the reviewer: live OpenSea API paths, real partial-fill collection offers, mempool behavior.
+Independent AI review of the escrow contract: in progress. Results will be recorded here.
