@@ -53,7 +53,18 @@ Approvals: users give Market no NFT approvals. ERC20 currencies need an allowanc
 10. **External strategies** are third-party code and may be mutable. Bounds are the only guarantee.
 11. **Wash trades.** Anyone can sell to themselves at any price; `onMarketSale` observers must not treat Market sale prices as trustworthy market data.
 12. **Metadata is untrusted.** Only http(s)/ipfs image URLs pass; names are trimmed text rendered as text.
+13. **Collection contracts are trusted for delivery.** A bid on a hostile or non-standard ERC721 can pay for an NFT that never moves.
 
 ## Review findings
 
-Independent AI review of the escrow contract: in progress. Results will be recorded here.
+Independent AI review of `contracts/Market.sol` at `606cc05` (not a human audit). Reviewer tests: `test/review/Review.t.sol`, 5/5 pass. No critical, high or medium findings.
+
+| # | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| 1 | Low | `cancelListing` reverted when the owner had disabled the listing's currency, so cancelling depended on the owner (withdrawal still worked) | Fixed: `cancelListing` checks only the order and seller. `test_cancelListingIgnoresDisabledCurrency` |
+| 2 | Low | Any buyer or seller can name itself as referrer and take the 0.10% referral, so the effective protocol fee is 0.10% for anyone who does | Accepted and documented (D033). A check against the caller is bypassed by a second address. Owner review |
+| 3 | Info | A listing with floor 0 and price 0 sells for nothing; a bid with maxPrice 0 buys for nothing | The owner's own terms. The app warns before a zero floor |
+| 4 | Info | A hostile NFT contract can fake delivery and collect a bid's payment | Inherent to any marketplace: bids trust the collection contract. Known risk 13 |
+| 5 | Info | Starving the royalty call to evade royalty | Not exploitable: the rest of the sale needs more gas than the 1/64 left |
+
+Not covered by the reviewer: rerunning fork tests, `fillOffer` inside the invariant handler, non-WETH currencies beyond mocks, OpenSea zone paths beyond the two fixtures.

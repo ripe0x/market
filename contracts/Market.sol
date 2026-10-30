@@ -340,8 +340,10 @@ contract Market {
     /// @notice Stop a listing from filling. The NFT stays in escrow until withdrawn.
     function cancelListing(Listing calldata l, uint256 id) external lock {
         if (msg.sender != l.seller) revert Unauthorized();
-        _liveListing(l, id);
-        orders[id].cancelled = true;
+        Order storage o = orders[id];
+        // No expiry or currency check: cancelling never depends on the owner.
+        if (o.hash != hashListing(l) || o.cancelled) revert NotActive();
+        o.cancelled = true;
         emit Cancelled(id);
     }
 
