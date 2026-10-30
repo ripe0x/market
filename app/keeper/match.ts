@@ -107,3 +107,15 @@ export function matchArgs(listing: Components, signature: Hex, bid: Bid) {
     nftWanted.itemType === 4 ? [{ orderIndex: 1n, side: 1, index: 0n, identifier: tokenId, criteriaProof: [] as Hex[] }] : [];
   return [toAdvancedOrder(listing, signature), bid, criteriaResolvers, fulfillments] as const;
 }
+
+/**
+ * Fees for a same-nonce replacement: double today's estimate, but never less
+ * than 115% of what was last sent, or nodes reject it as underpriced.
+ */
+export function replacementFees(now: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }, last: { maxFee?: string; tip?: string }) {
+  const atLeast = (x: bigint, prev?: string) => {
+    const floor = prev ? (BigInt(prev) * 115n) / 100n : 0n;
+    return x > floor ? x : floor;
+  };
+  return { maxFee: atLeast(now.maxFeePerGas * 2n, last.maxFee), tip: atLeast(now.maxPriorityFeePerGas * 2n + 1n, last.tip) };
+}

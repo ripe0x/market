@@ -8,7 +8,7 @@ import { mainnet } from "viem/chains";
 import { MARKET, marketAbi, matchSplit, minReleasedFor, seaportAbi } from "../lib/order";
 import * as os from "../lib/opensea";
 import { allListings, client, db, liveState, meta, rpcUrl, setMeta, type Live } from "../lib/server";
-import { matchArgs, parseBid, released, type Bid } from "./match";
+import { matchArgs, parseBid, released, replacementFees, type Bid } from "./match";
 
 const INTERVAL_MS = Number(process.env.KEEPER_INTERVAL_MS ?? 15_000);
 const CONFIRMATIONS = BigInt(process.env.CONFIRMATIONS ?? 3);
@@ -23,8 +23,12 @@ const key = process.env.KEEPER_PRIVATE_KEY as Hex | undefined;
 // Local fork only: an anvil-unlocked address signs through the node, so no key is handled.
 const unlocked = /127\.0\.0\.1|localhost/.test(rpcUrl) ? (process.env.KEEPER_UNLOCKED_ADDRESS as Hex | undefined) : undefined;
 const account = key ? privateKeyToAccount(key) : unlocked ? { address: unlocked, type: "json-rpc" as const } : undefined;
-// Optional private submission endpoint (for example Flashbots Protect) against front-running.
-const wallet = account && createWalletClient({ account, chain: mainnet, transport: http(process.env.SUBMIT_RPC_URL ?? rpcUrl) });
+// Match calldata works for any caller, so public-mempool submission hands the
+// executor fee to whoever copies it. Off a local fork, matching requires a
+// private submission endpoint (for example Flashbots Protect).
+const local = /127\.0\.0\.1|localhost/.test(rpcUrl);
+const submitUrl = process.env.SUBMIT_RPC_URL ?? (local ? rpcUrl : undefined);
+const wallet = account && submitUrl ? createWalletClient({ account, chain: mainnet, transport: http(submitUrl) }) : undefined;
 export const matching = Boolean(wallet && (os.apiKey || DEV_OFFERS_FILE));
 
 /** Market Sale events up to head - CONFIRMATIONS, joined to Seaport's order hash in the same receipt. */
@@ -128,7 +132,8 @@ export async function tryMatch(l: Live, offers = candidates): Promise<Hex | null
         maxFeePerGas: fees.maxFeePerGas,
         maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
       });
-      db().prepare("insert into attempts values (?,?,?,?,?,?,?)").run(tx, l.hash, c.hash, nonce, "pending", null, Date.now());
+      const sent = JSON.stringify({ maxFee: fees.maxFeePerGas.toString(), tip: fees.maxPriorityFeePerGas.toString() });
+      db().prepare("insert into attempts values (?,?,?,?,?,?,?)").run(tx, l.hash, c.hash, nonce, "pending", sent, Date.now());
       log("submitted", { tx, listing: l.hash, offer: c.hash, released: r, price, executorFee, gas });
       return tx;
     } catch (e: any) {
@@ -145,7 +150,7 @@ async function settlePending(): Promise<boolean> {
   const receipt = await client.getTransactionReceipt({ hash: p.tx }).catch(() => null);
   if (receipt) {
     const status = receipt.status === "success" ? "confirmed" : "reverted";
-    db().prepare("update attempts set status = ?, detail = ? where tx = ?").run(status, `gas ${receipt.gasUsed}`, p.tx);
+    db().prepare("update attempts set status = ? where tx = ?").run(status, p.tx);
     log(status, { tx: p.tx, listing: p.listing, gasUsed: receipt.gasUsed });
     return false;
   }
@@ -156,16 +161,15 @@ async function settlePending(): Promise<boolean> {
     return false;
   }
   if (Date.now() - p.created_at > STUCK_SECONDS * 1000) {
+    // A replacement must outbid the last fees sent at this nonce by more than 10%,
+    // even if the base fee has since dropped.
     const fees = await client.estimateFeesPerGas();
-    const cancel = await wallet!.sendTransaction({
-      to: account!.address,
-      value: 0n,
-      nonce: p.nonce,
-      maxFeePerGas: fees.maxFeePerGas * 2n,
-      maxPriorityFeePerGas: fees.maxPriorityFeePerGas * 2n + 1n,
-    });
-    db().prepare("update attempts set created_at = ?, detail = ? where tx = ?").run(Date.now(), `cancel ${cancel}`, p.tx);
-    log("cancel_sent", { tx: p.tx, cancel });
+    const { maxFee, tip } = replacementFees(fees, JSON.parse(p.detail ?? "{}"));
+    const cancel = await wallet!.sendTransaction({ to: account!.address, value: 0n, nonce: p.nonce, maxFeePerGas: maxFee, maxPriorityFeePerGas: tip });
+    db()
+      .prepare("update attempts set created_at = ?, detail = ? where tx = ?")
+      .run(Date.now(), JSON.stringify({ maxFee: maxFee.toString(), tip: tip.toString(), cancel }), p.tx);
+    log("cancel_sent", { tx: p.tx, cancel, maxFee, tip });
   }
   return true;
 }
@@ -184,7 +188,8 @@ export async function round() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   log("start", { market: MARKET, keeper: account?.address, matching, source: DEV_OFFERS_FILE ? "dev file" : os.apiKey ? "opensea" : "none" });
-  if (!matching) log("matching_off", { reason: !wallet ? "no KEEPER_PRIVATE_KEY" : "no OPENSEA_API_KEY" });
+  if (!matching)
+    log("matching_off", { reason: !account ? "no KEEPER_PRIVATE_KEY" : !wallet ? "no SUBMIT_RPC_URL (private relay required off a local fork)" : "no OPENSEA_API_KEY" });
   let stop = false;
   for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => ((stop = true), log("stopping")));
   while (!stop) {

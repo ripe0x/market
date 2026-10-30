@@ -81,7 +81,7 @@ PROTOCOL_FEE_RECIPIENT=0xRecipient forge script script/Deploy.s.sol --rpc-url ma
 
 ## Run in production
 
-One host with a persistent disk. Copy `app/.env.example` to the host's environment; inject `OPENSEA_API_KEY` and `KEEPER_PRIVATE_KEY` from its secret store.
+One host with a persistent disk. Copy `app/.env.example` to the host's environment; inject `OPENSEA_API_KEY` and `KEEPER_PRIVATE_KEY` from its secret store. Set `SUBMIT_RPC_URL` to a private relay; without it the keeper only syncs sales.
 
 ```bash
 cd app && npm run build && npm start

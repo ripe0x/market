@@ -37,9 +37,11 @@ interface IERC721 {
 /// - On a match, every WETH unit the offer releases beyond its own mandatory
 ///   consideration and the seller's amount lands here and is paid out in the same
 ///   call: fees to the executor and protocol, the rest to the seller.
-/// - Users grant this contract no approvals. It holds no WETH, ETH or NFT between
-///   transactions. Its max WETH approval to Seaport is only usable while this
-///   contract is the Seaport caller, because it signs no orders.
+/// - Users grant this contract no approvals. Its own calls leave no WETH, ETH or
+///   NFT behind. WETH sent here directly is paid to the next matched seller as
+///   surplus (fees apply); nothing else can withdraw it. Its max WETH approval to
+///   Seaport is only usable while this contract is the Seaport caller, because it
+///   signs no orders.
 /// - No owner, no upgrade, no pause. Fees are constants of this deployment and are
 ///   bound into every listing through the signed zone address.
 contract Market {

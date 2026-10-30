@@ -36,7 +36,7 @@ Approvals: sellers approve the OpenSea conduit (`setApprovalForAll`). That appro
 ## Known risks
 
 1. **Surplus can be taken by arbitrage.** Anyone may buy at the current price and sell into a higher offer themselves. This is inherent to a public declining price.
-2. **Executor fee can be front-run.** A keeper transaction's calldata works for any caller (the zone signature names Market, not the keeper). The seller is unaffected; the keeper loses its fee. Use `SUBMIT_RPC_URL` with a private relay.
+2. **Executor fee can be front-run.** A keeper transaction's calldata works for any caller (the zone signature names Market, not the keeper). The seller is unaffected; the keeper loses its fee. The keeper refuses to match on mainnet without `SUBMIT_RPC_URL` (a private relay).
 3. **Old listings revive if the seller reacquires the NFT** before the listing ends and the conduit approval is still on. Cancel to prevent.
 4. **OpenSea dependency.** Live matching depends on OpenSea issuing zone signatures for Market as fulfiller (unverified, needs API key) and on its API's availability and rate limits.
 5. **Stray WETH sent to Market** is paid to the next matched seller. Nothing else can withdraw it.
@@ -46,4 +46,14 @@ Approvals: sellers approve the OpenSea conduit (`setApprovalForAll`). That appro
 
 ## Review findings
 
-Pending.
+Independent AI review of commit `2018970` (not a human audit), scope: `Market.sol`, listing intake API, keeper. Reviewer tests: `test/review/Review.t.sol` (4/4 pass).
+
+| # | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| 1 | Medium | Keeper submitted to the public mempool when `SUBMIT_RPC_URL` was unset, so its executor fee could be front-run | Fixed: off a local fork, matching stays off without a private submission endpoint |
+| 2 | Low | Stray WETH sent to Market is paid to the next matched seller; the contract comment claimed Market never holds WETH | Accepted and documented (risk 5). Not profitable to anyone but the seller; comment corrected |
+| 3 | Low | Stuck-tx replacement could be underpriced after a base fee drop, stalling the keeper | Fixed: replacement fees are at least 115% of the last send (`replacementFees`, unit tested) |
+| 4 | Info | A searcher can buy at the current price and resell into a higher offer | By design (D013); risk 1 |
+| 5 | Info | Attacker-supplied consideration, resolvers and fulfillments cannot skim surplus | Confirmed by `test_cannotRouteSurplusToExecutorViaFulfillments`, `test_extraFulfillmentCannotSkimSurplus` |
+
+No critical or high findings. Not tested by the reviewer: live OpenSea API paths, real partial-fill collection offers, mempool behavior.

@@ -24,8 +24,9 @@ Implemented and locally verified: settlement contract, real-offer fork proof, di
 | Real OpenSea offers, both fixtures | `forge test --match-path test/MatchOffer.t.sol` | 20/20 pass |
 | Direct buy, pricing fuzz | `forge test --match-path test/Buy.t.sol` | 15/15 pass (fuzz 256 runs each) |
 | Adversarial | `forge test --match-path test/Adversarial.t.sol` | 7/7 pass |
-| TS unit and fixture parity | `cd app && npm test` | 7/7 pass |
-| Keeper on fork, real offer | `cd app && npm run e2e:keeper` | pass, 383,763 gas |
+| TS unit and fixture parity | `cd app && npm test` | 8/8 pass |
+| Independent review tests | `forge test --match-path test/review/Review.t.sol` | 4/4 pass |
+| Keeper on fork, real offer, API intake | `cd app && npm run e2e:keeper` | pass, 383,787 gas |
 | Typecheck, production build | `npx tsc --noEmit`, `npx next build` | pass |
 | Deploy dry run | `forge script script/Deploy.s.sol --rpc-url mainnet` | pass, 2.34M gas |
 | UI on local fork | list, approve, sign, buy, keeper match, cancel, yours page, mobile, light and dark | pass |
