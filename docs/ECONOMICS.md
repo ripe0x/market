@@ -1,62 +1,84 @@
 # Economics
 
-Measured 2026-10-30. Gas from fork receipts (`docs/PHASE0_EVIDENCE.md`). Mainnet base fee at measurement: 0.40 gwei.
+Measured 2026-10-30 for the escrow design (D023 to D035). Mainnet base fee at measurement: 0.40 gwei.
 
-## Fees
+## Fees (D033)
 
-| Path | Who pays | Fee | Recipient |
-| --- | --- | --- | --- |
-| Direct buy | Buyer, on top of the price | 0.20% of price | Protocol |
-| Offer match | Taken from WETH the offer releases (seller amount + surplus) | 0.30% | Executor (caller) |
-| | | 0.20% | Protocol |
+All fees come out of the sale price, the amount the buyer pays.
 
-The seller always receives at least the listing's current price. On a match the seller also receives all surplus minus the 0.5%.
+| Path | Royalty (ERC-2981) | Protocol | Executor | Referral |
+| --- | --- | --- | --- | --- |
+| `buy` | yes | 0.20% | none | 0.10% of the 0.20%, if named |
+| Sell into a bid | yes | 0.20% | none | 0.10% of the 0.20%, if named |
+| `matchBid` | yes | 0.20% | 0.30% to caller | none |
+| `fillOffer` (OpenSea) | none from Market; the offer pays OpenSea's fee and creator fee | 0.20% | 0.30% to caller | none |
+
+The seller always receives at least the ask. A direct buyer pays the ask grossed up for royalty and the protocol fee: about `ask / (1 - royalty - 0.002)`.
+
+## Gas
+
+Execution gas on a pinned fork with real WETH and a real NFT (Otherdeed), first touch of every slot (`forge test --match-path test/Gas.t.sol -vv`). Execution excludes the 21,000 base and calldata.
+
+| Action | Execution gas | Whole transaction, estimated |
+| --- | --- | --- |
+| List (`safeTransferFrom` deposit) | 156,605 | about 182,000 |
+| `buy` with ETH | 214,067 | about 240,000 |
+| `createBid` with ETH | 108,215 to 125,311 | about 135,000 |
+| Sell into a bid | 216,792 | about 245,000 |
+| `matchBid` | 232,125 | about 263,000 |
+| `fillOffer`, real OpenSea item offer | 435,583 | about 482,000 |
+| `cancelListing` | 58,846 | about 82,000 |
+| `withdrawListing` | 102,033 | about 125,000 |
+| `withdrawBid` | 65,240 | about 90,000 |
+
+Whole-transaction figures add the base and an estimate of calldata; the keeper end-to-end run records receipts. `fillOffer` includes three first-time WETH balances (seller, executor, protocol); recurring recipients cost about 40,000 less. OpenSea's own accept-offer for the same offer used 263,662.
+
+Listing now costs a deposit transaction (about 182,000 gas, about 0.00007 ETH at 0.4 gwei). The old design listed by signature only.
 
 ## Keeper profitability
 
-One match costs **383,763 gas** (real OpenSea offer, whole transaction). Profit = executor fee minus gas, before API and hosting cost.
+Profit = executor fee (0.30% of the sale price) minus gas, before API and hosting cost.
 
-| Released (WETH) | Executor fee | Protocol fee | 0.4 gwei | 1 gwei | 3 gwei | 10 gwei | 30 gwei |
+**`fillOffer`, about 482,000 gas:**
+
+| Sale price (WETH) | Executor fee | Protocol fee | 0.4 gwei | 1 gwei | 3 gwei | 10 gwei | 30 gwei |
 |---|---|---|---|---|---|---|---|
-| 0.05 | 0.00015 | 0.00010 | -0.00000 | -0.00023 | -0.00100 | -0.00369 | -0.01136 |
-| 0.1 | 0.00030 | 0.00020 | +0.00015 | -0.00008 | -0.00085 | -0.00354 | -0.01121 |
-| 0.5 | 0.00150 | 0.00100 | +0.00135 | +0.00112 | +0.00035 | -0.00234 | -0.01001 |
-| 1 | 0.00300 | 0.00200 | +0.00285 | +0.00262 | +0.00185 | -0.00084 | -0.00851 |
-| 5 | 0.01500 | 0.01000 | +0.01485 | +0.01462 | +0.01385 | +0.01116 | +0.00349 |
-| 10 | 0.03000 | 0.02000 | +0.02985 | +0.02962 | +0.02885 | +0.02616 | +0.01849 |
+| 0.05 | 0.00015 | 0.00010 | -0.00004 | -0.00033 | -0.00130 | -0.00467 | -0.01431 |
+| 0.1 | 0.00030 | 0.00020 | +0.00011 | -0.00018 | -0.00115 | -0.00452 | -0.01416 |
+| 0.5 | 0.00150 | 0.00100 | +0.00131 | +0.00102 | +0.00005 | -0.00332 | -0.01296 |
+| 1 | 0.00300 | 0.00200 | +0.00281 | +0.00252 | +0.00155 | -0.00182 | -0.01146 |
+| 5 | 0.01500 | 0.01000 | +0.01481 | +0.01452 | +0.01355 | +0.01018 | +0.00054 |
+| 10 | 0.03000 | 0.02000 | +0.02981 | +0.02952 | +0.02855 | +0.02518 | +0.01554 |
 
-**Minimum viable match** (keeper default margin 1.25x gas):
+**Minimum viable sale price** (keeper default margin 1.25x gas):
 
-| Base fee | Gas cost | Break-even released | With 1.25x margin |
-| --- | --- | --- | --- |
-| 0.4 gwei | 0.000154 ETH | 0.051 | 0.064 |
-| 1 gwei | 0.000384 ETH | 0.128 | 0.160 |
-| 3 gwei | 0.001151 ETH | 0.384 | 0.480 |
-| 10 gwei | 0.003838 ETH | 1.279 | 1.599 |
-| 30 gwei | 0.011513 ETH | 3.838 | 4.797 |
+| Base fee | `fillOffer` break-even | with margin | `matchBid` break-even | with margin |
+| --- | --- | --- | --- | --- |
+| 0.4 gwei | 0.064 | 0.080 | 0.035 | 0.044 |
+| 1 gwei | 0.161 | 0.201 | 0.088 | 0.110 |
+| 3 gwei | 0.482 | 0.603 | 0.263 | 0.329 |
+| 10 gwei | 1.607 | 2.008 | 0.877 | 1.096 |
+| 30 gwei | 4.820 | 6.025 | 2.630 | 3.288 |
 
-The keeper computes this per candidate from the live base fee and skips anything below it. Listings below the threshold can still sell by direct buy, or by any executor willing to subsidize.
-
-Failed attempts cost the executor gas only. Simulation before submission makes them rare; the remaining causes are races (offer filled, cancelled, or the listing bought first) and zone signatures expiring in the mempool.
+The keeper computes this per candidate from the live base fee and skips anything below it. Below the threshold a listing still sells by direct buy or a bid sell, which cost the executor nothing.
 
 ## How often matching adds a fill
 
-Sparse evidence, one hour (300 blocks before 26303129): 7 OpenSea accept-offer fills on Seaport 1.6. Offer sizes: 0.002, 0.0072, 0.0074, 0.0124, 0.0128, 0.0617, 0.235 WETH. At 0.4 gwei only 2 of 7 clear the threshold. Matching is a meaningful path for established collections with offers above roughly 0.1 WETH; it is not a reason to expect sales of small NFTs.
+OpenSea carried about 99% of Ethereum ERC721 bid fills over 24 hours: 4,075 fills, 214.1 WETH, 331 at or above 0.064 WETH (`PHASE0_EVIDENCE.md`). At 0.4 gwei the `fillOffer` threshold (0.08 WETH with margin) admits a few hundred offers a day across all collections. Market's own bids add a second source that is cheaper to fill. There is no evidence yet of Market bid demand.
 
 ## Seller outcome versus alternatives
 
-- **Accept the offer yourself on OpenSea:** you get the released amount and pay about 264k gas. Through Market you get 0.5% less and pay no gas, without watching. If the seller would accept today's best offer anyway, accepting it directly is cheaper.
-- **Fixed-price listing:** sells only at that price. A declining price trades time for price discovery; it does not maximize proceeds.
-- **Surplus is not guaranteed.** The price falls continuously, so a match usually fires just after the price crosses an existing offer, leaving little surplus. Surplus is large only when a new, higher offer appears while the price is still above it.
-- **Anyone can buy at the current price and resell into a higher offer.** That arbitrage takes the surplus a match would have paid the seller. Running the keeper often and submitting privately narrows the window; it cannot close it.
+- **Accepting the offer yourself on OpenSea:** you get the released amount and pay about 264k gas. Through Market you pay the deposit (about 182k gas) and 0.5% of the sale price, and need not watch. If you would accept today's best offer anyway, accept it directly.
+- **Fixed price:** sells only at that price. A falling price trades time for price discovery; it does not maximize proceeds.
+- **Surplus:** a falling ask usually crosses an existing offer and fills just after, so surplus is small. `matchBid` gives the seller the whole gap to the bid; arbitrage through `buy` plus an outside resale can take it first (D025).
 
-## Fee decision (D006)
+## Fee decision (D033)
 
-Keep 0.30% executor and 0.20% protocol. At today's gas, matching is viable from about 0.06 WETH. A higher executor share would lower the threshold but take more from every seller; a fixed fee would overcharge large sales. Revisit if typical base fee rises above about 3 gwei.
+Keep 0.30% executor and 0.20% protocol, with a 0.10% referral share out of the protocol fee. At today's gas, OpenSea fills are viable from about 0.08 WETH and Market bid matches from about 0.044 WETH. Revisit if typical base fee rises above about 3 gwei.
 
 ## Operating cost
 
-- OpenSea API key: free tier, rate limited. Required in practice (see `PHASE0_EVIDENCE.md`).
+- OpenSea API key: free tier, rate limited. Required for offer discovery and zone signatures.
 - RPC: public endpoint works for development; a paid RPC is advisable for the keeper.
 - Hosting: one small Node host for web and keeper with a local SQLite file.
 - Keeper wallet: holds only ETH for gas.
