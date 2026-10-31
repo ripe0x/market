@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decodeAbiParameters } from "viem";
-import { askAt, bidPriceAt, builtinPrice, buyerPrice, fixedPrice, listData, sellData, type Bid, type Listing, type Price } from "./order";
+import { askAt, bidPriceAt, builtinPrice, buyLimit, buyerPrice, fixedPrice, listData, sellData, type Bid, type Listing, type Price } from "./order";
 
 const addr = "0x00000000000000000000000000000000000000a1";
 const curve = (start: bigint, end: bigint): Price => ({ start, end, startTime: 1000, endTime: 1000 + 86400, strategy: "0x0000000000000000000000000000000000000000", data: `0x${"0".repeat(64)}` });
@@ -35,6 +35,18 @@ test("buyerPrice grosses the ask up past the protocol fee", () => {
     const p = buyerPrice(ask);
     assert.ok(p - (p * 20n) / 10_000n >= ask, "proceeds cover the ask");
   }
+});
+
+test("buyLimit adds headroom only when the price can rise", () => {
+  const l: Listing = { seller: addr, nft: addr, tokenId: 1n, currency: addr, recipient: addr, floor: 0n, expiry: 0, price: curve(2n, 1n) };
+  assert.equal(buyLimit(l, 1000n), 1000n); // falling
+  l.price = fixedPrice(5n);
+  assert.equal(buyLimit(l, 1000n), 1000n); // fixed
+  l.price = curve(1n, 2n);
+  assert.equal(buyLimit(l, 1000n), 1010n); // rising
+  assert.equal(buyLimit(l, 1001n), 1012n); // headroom rounds up
+  l.price = { ...curve(2n, 1n), strategy: "0x00000000000000000000000000000000000000ff" };
+  assert.equal(buyLimit(l, 1000n), 1010n); // external strategy
 });
 
 test("listData and sellData encode the structs Market decodes back", () => {

@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-10-30
+Updated: 2026-10-31
 
 ## State
 
@@ -33,6 +33,7 @@ Revision `99d2c20` (contract) and `e62cc3d` (app). Run on 2026-10-30.
 | Typecheck, production build | `cd app && npx tsc --noEmit`, `npx next build` | pass |
 | Deploy dry run | `PROTOCOL_FEE_RECIPIENT=… MARKET_OWNER=… forge script script/Deploy.s.sol --rpc-url mainnet` | pass, 5.3M gas estimate |
 | UI on local fork | browse, buy, create bid, sell into bid, zero-floor warning, 375px width | pass (app agent run; `scripts/fork.sh`) |
+| Rising-listing buy and 375px header | list 0.1 to 1 WETH rising over 1 day, buy from a second dev account at 375px | pass: charged 0.606682 above the 0.606349 click quote, 0.005729 refunded as WETH; header wraps with no horizontal scroll |
 
 Not run: full suite as a release candidate (`CANDIDATE_RUN=1`); `fillOffer` inside the invariant handler (fork only); live OpenSea signing for a deployed Market.
 
@@ -45,8 +46,7 @@ Not run: full suite as a release candidate (`CANDIDATE_RUN=1`); `fillOffer` insi
 ## Known gaps
 
 - Owned-NFT pickers need an OpenSea API key; without one, sell and sell-into-bid take a manual contract and token id.
-- `buy` passes the quoted price as `maxPrice`; a rising listing can tick up before inclusion and revert, so the buyer retries.
-- Header navigation is tight at 375px.
+- Rising and external-strategy listings: the app sends up to 1% over the quote (`buyLimit`); a rise beyond that before inclusion reverts and the buyer retries.
 
 ## Next action
 

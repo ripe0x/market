@@ -37,6 +37,10 @@ button, input, select { font: inherit; color: inherit; }
 .nav { display: flex; align-items: center; gap: 24px; }
 .nav a { font-size: 14px; color: var(--muted); }
 .nav a[aria-current="page"], .nav a:hover { color: var(--fg); }
+@media (max-width: 599px) {
+  .top .wrap { flex-wrap: wrap; height: auto; padding-block: 14px; row-gap: 10px; }
+  .nav { width: 100%; justify-content: space-between; gap: 12px; }
+}
 
 /* Type */
 .label { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }

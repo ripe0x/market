@@ -173,6 +173,14 @@ export function bidPriceAt(b: Bid, now: bigint): bigint | null {
 /** Preview of what a direct buyer pays for an ask, ignoring royalty (quoteBuy gives the exact figure). */
 export const buyerPrice = (ask: bigint): bigint => (ask * BPS + (BPS - PROTOCOL_FEE_BPS - 1n)) / (BPS - PROTOCOL_FEE_BPS);
 
+/**
+ * `maxPrice` for `buy`. A listing whose price can rise before inclusion (rising curve or
+ * external strategy) gets 1% headroom; Market charges the price at inclusion and returns
+ * the unused ETH as WETH. Fixed and falling listings use the quote exactly.
+ */
+export const buyLimit = (l: Listing, quote: bigint): bigint =>
+  l.price.strategy !== ZERO || l.price.end > l.price.start ? quote + (quote + 99n) / 100n : quote;
+
 // JSON storage keeps bigints as decimal strings. quantity stays a bigint for ABI encoding.
 const priceFromJson = (p: any): Price => ({ start: BigInt(p.start), end: BigInt(p.end), startTime: Number(p.startTime), endTime: Number(p.endTime), strategy: p.strategy, data: p.data });
 export const toJson = (o: unknown) => JSON.stringify(o, (_, v) => (typeof v === "bigint" ? v.toString() : v));

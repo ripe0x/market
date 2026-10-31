@@ -3,7 +3,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
-import { MARKET, fixedPrice, marketAbi, type Listing as Terms } from "../../../../lib/order";
+import { MARKET, buyLimit, fixedPrice, marketAbi, type Listing as Terms } from "../../../../lib/order";
 import { date, duration, eth, explorer, parseEth, short } from "../../../ui/format";
 import { Art, Curve, State, Wallet, getJson, hydrateListing, useListingAsk, type Listing } from "../../../ui/parts";
 import { TxButton, TxStatus, useTx } from "../../../ui/tx";
@@ -144,6 +144,7 @@ function Action({ l, refetch, sale }: { l: Listing; refetch: () => void; sale: S
         <div className="rows" style={{ marginBottom: 16 }}>
           <div className="row"><span className="muted">You pay</span><span className="num">{eth(price, 4, true)} ETH</span></div>
           {quote.data && quote.data.royalty > 0n && <div className="row"><span className="muted">Includes royalty</span><span className="num">{eth(quote.data.royalty, 6)} WETH</span></div>}
+          {buyLimit(t, price) > price && <div className="row"><span className="muted">Rising price. You send at most</span><span className="num">{eth(buyLimit(t, price), 4, true)} ETH; unused returns as WETH</span></div>}
         </div>
       )}
       <TxButton
@@ -151,9 +152,10 @@ function Action({ l, refetch, sale }: { l: Listing; refetch: () => void; sale: S
         disabled={price === null}
         onClick={() =>
           buy.run(async () => {
-            // Re-quote at the latest block; a declining price only falls before inclusion and Market refunds the difference as WETH.
+            // Re-quote at the latest block. Market charges the price at inclusion and returns unused ETH as WETH.
             const q = await client!.readContract({ address: MARKET, abi: marketAbi, functionName: "quoteBuy", args: [t, BigInt(l.id)] });
-            const call = { address: MARKET, abi: marketAbi, functionName: "buy", args: [t, BigInt(l.id), q.price, "0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000"], value: q.price } as const;
+            const max = buyLimit(t, q.price);
+            const call = { address: MARKET, abi: marketAbi, functionName: "buy", args: [t, BigInt(l.id), max, "0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000"], value: max } as const;
             const gas = await client!.estimateContractGas({ ...call, account: address! });
             return writeContractAsync({ ...call, gas: gas + 40_000n });
           })
