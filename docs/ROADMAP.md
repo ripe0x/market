@@ -1,5 +1,7 @@
 # Roadmap
 
+Revised 2026-10-30: the owner chose shared escrow (D023) and an open protocol with bids, pricing strategies, currencies, royalties and callbacks (D024 to D035). Phases 1 to 5 now apply to the escrow contract. Phase 0's integration proof is redone for escrow (`PHASE0_EVIDENCE.md`, Escrow fill).
+
 Execute the phases in order except for independent work that can proceed while external dependencies are blocked. Each phase ends only with code, tests, records and a status update. A plan alone is not a deliverable.
 
 ## Phase 0: real integration and architecture decision

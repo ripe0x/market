@@ -1,0 +1,14 @@
+out/
+cache/
+broadcast/*/31337/
+node_modules/
+.next/
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+broadcast/
+tsconfig.tsbuildinfo
+next-env.d.ts
+app/.dev-offers.json

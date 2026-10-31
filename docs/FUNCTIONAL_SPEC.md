@@ -1,134 +1,105 @@
 # Functional specification: Market
 
-Status: initial specification. Created 2026-10-30. No implementation or live integration has been verified here.
+Status: revised 2026-10-30 for the owner's escrow and open-protocol decisions (D023 to D035). Implementation state: `STATUS.md`.
 
-## 1. Purpose and product promise
+## 1. Purpose
 
-A holder who wants to sell one Ethereum NFT should be able to set a price that automatically declines and leave the sale alone. A buyer can purchase at the current price. Separately, the product watches existing onchain offers, initially OpenSea Seaport, and attempts an atomic sale when an available offer meets the seller's authorized minimum net proceeds.
+Market is an open onchain exchange for Ethereum ERC721 tokens. **The contracts are the product; our web app is one interface.** Every operation is permissionless and callable by wallets, contracts, agents and other frontends.
 
-The seller keeps the NFT until settlement. The product does not guarantee a sale or the best market price. It does not need its own bidders, trading token, liquidity pool, or large marketplace.
+A holder lists an NFT with a price that can be fixed, rise or fall over time, and walks away. It sells to a direct buyer, to a Market bid, or to a compatible OpenSea offer, whichever first meets the seller's minimum. A buyer can run a bid that acquires one token, any token in a range, or any token in a collection, within a budget.
 
-The key differentiation over an ordinary Dutch auction is automatic matching to outside liquidity and seller protection on the execution surplus. Most of an existing offer's net value should reach the seller, rather than being left for a matcher to capture without disclosure.
+Market guarantees authorized execution, not best execution or a sale.
 
-## 2. Audience and usage
+## 2. Roles
 
-Primary user: NFT holders who wish to exit an asset with minimal ongoing attention. Particularly relevant for holders of multiple NFTs in established collections with existing bids.
+| Role | Does |
+| --- | --- |
+| Seller | Deposits an NFT with listing terms; updates, cancels, withdraws; sells into a bid |
+| Buyer | Buys a listing; creates, cancels and withdraws bids |
+| Executor (anyone) | Runs `matchBid` and `fillOffer`; earns the executor fee |
+| Referrer | Named by an interface on `buy` or a sell into a bid; earns part of the protocol fee |
+| Collection | Optionally receives sale notifications; may set ERC-2981 royalty |
+| Owner | Enables currencies and OpenSea zones. No access to assets |
 
-Secondary user: buyers who want to purchase a listed NFT directly at its current asking price. Executors or keepers are infrastructure participants, not the primary customer.
+## 3. Flows
 
-Not intended for initial mint drops, complex auctions, guaranteed liquidation, collection market making, loans, or ERC20 swaps.
+### 3.1 List
 
-## 3. Product flows
+1. Seller calls `nft.safeTransferFrom(seller, market, tokenId, 0x00 ‖ abi.encode(Listing))`. One transaction; no approval. Only the owner itself may make this transfer.
+2. Terms: currency, proceeds recipient, `floor`, expiry, price (built-in or external strategy). Seller, NFT and token id come from the transfer.
+3. Market stores a hash of the terms and emits `Listed` with the full terms.
+4. The seller may `updateListing` (new terms, same NFT), `cancelListing` (stops fills; NFT stays), or `withdrawListing` (NFT to any address). Cancel needs no transfer, so a failing NFT cannot leave a listing fillable.
 
-### 3.1 Seller creates a listing
+### 3.2 Buy
 
-1. Connect an Ethereum wallet and select an ERC721 NFT that the wallet owns.
-2. Enter starting seller net price, minimum seller net price, time until the price reaches that minimum, and expiry. The minimum must be at most the start. The expiry must be at or after the decline ends. The UI presents plain values and clear transaction and authorization details.
-3. Show a live projected net price schedule and the extra execution fees required for a direct buyer. The listed price is the minimum NET proceeds guaranteed to the seller in WETH, after our protocol and executor fees and any external mandatory consideration. Display the distinction explicitly.
-4. Seller signs a bounded order or authorization and grants only the necessary NFT approval to the verified settlement operator. Prefer standard signed Seaport orders and native approvals if they can enforce the same guarantees; otherwise use the smallest EIP712 sale authorization and settlement contract that does.
-5. Save the signed listing through an authenticated endpoint and show its onchain signature validity and live state. No NFT escrow or token deposit.
-6. Support cancel by a binding onchain cancellation or nonce invalidation. Hiding a listing in the database alone is not adequate cancellation. An expired, canceled, transferred or revoked order cannot execute.
+`quoteBuy` gives the price and split. `buy(listing, id, maxPrice, recipient, referrer)` pays with ETH (WETH listings) or the currency. The NFT goes to `recipient`; the seller gets at least the ask. Excess ETH returns as WETH.
 
-Recommend a nonzero floor by default. Permit an explicit zero floor only with a conspicuous confirmation that near zero execution is possible. It still does not guarantee a sale.
+### 3.3 Bid (acquisition program)
 
-### 3.2 Direct buyer purchases
+`createBid` deposits the whole budget. Terms: collection, `[minTokenId, maxTokenId]`, currency, budget, `maxPrice` per NFT, quantity, recipient, expiry, price. A bid fills:
 
-1. A public listing page displays the NFT, the current net target, total buyer consideration including fees, the remaining decline and expiry.
-2. A buyer can fulfill the signed sale at the current executable price. The seller receives at least their current required net. All payments and the NFT transfer happen atomically.
-3. The order becomes unfillable after one successful sale. Buyer sees a clear failure if sold, revoked, expired, or insufficiently approved.
+- when a holder calls `safeTransferFrom(holder, market, tokenId, 0x01 ‖ abi.encode(Bid, bidId, minProceeds, referrer))`, or
+- when anyone calls `matchBid(listing, listingId, bid, bidId)` for an eligible escrowed listing. The sale is at the bid's price, so the seller keeps the surplus over the ask.
 
-Existing marketplace distribution is desirable only when compatible without weakening the seller's protected proceeds. Do not promise OpenSea will index arbitrary custom orders.
+Budget, quantity and per-NFT bounds hold under any interleaving of fills. `cancelBid` stops fills; `withdrawBid` returns the unspent budget.
 
-### 3.3 Automatic match to an external offer
+### 3.4 OpenSea offer
 
-1. A minimal worker discovers active OpenSea item and collection offers for supported collections through a documented API. The external API is a discovery surface, never the source of settlement truth.
-2. Compute the actual WETH that a specified offer would deliver after mandatory order consideration, external fees, royalties and constraints. Use signed order data, not only a headline bid price. Match only offers that are executable for this exact NFT.
-3. Compare possible net proceeds to the current seller minimum, protocol fee and executor reward. Simulate the actual atomic path and apply conservative gas and profitability limits.
-4. Submit a single Ethereum transaction that consumes the seller authorization and fills the external bid. On success the NFT ends with the offer's buyer, the seller gets all available net WETH from that selected offer less disclosed protocol and executor fees, and fees are transferred to explicit recipients.
-5. If either side is invalid or execution fails, the entire transaction reverts and the NFT is not left in a matcher wallet. The executor may lose gas on failed attempts.
-6. A permissionless external executor can submit an equivalent settlement if it meets the same enforced invariants. The protocol may operate its own matching worker, but the contract must not require that worker's ongoing operation.
+The keeper finds the best OpenSea offer for an escrowed listing, asks OpenSea to sign zone data for Market as fulfiller (OpenSea signs only for the NFT's owner), and calls `fillOffer(listing, id, offer, resolvers)`. Market fills the offer through `Seaport.fulfillAdvancedOrder`. The offer's consideration pays OpenSea's fee and any creator fee; Market adds none. The seller gets everything released minus Market's fees, and at least the ask.
 
-Do not assert global best execution: the system can optimize among offers it actually sees and supports, while another bidder or marketplace may have a better order. Anyone may purchase at the authorized minimum even if a higher external offer existed. Contract guarantees focus on net settlement of the chosen offer and user consent, not the theoretical best price anywhere.
+Accepted: offers in an enabled zone (OpenSea SignedZone), one ERC20 offer item in the listing's currency, consideration that Market can pay from what the offer releases. OpenSea returns either a `fulfillAdvancedOrder` or a `matchAdvancedOrders` shape; the keeper converts both (D034).
 
-### 3.4 Seller manages listings
+## 4. Pricing (D030)
 
-Show active listings, price now, price at expiry, ownership, order validity, recent execution status, and completed sales. Support onchain cancellation. Completed sales show actual NFT transfer, WETH received by the seller, the offer consumed, royalty and recipient transfers, executor fee, protocol fee, transaction link, and any difference between the executed bid and authorized minimum.
+- Built-in: linear from `start` at `startTime` to `end` at `endTime`, holding `start` before and `end` after. Fixed when `start == end`. Rounds up for a listing, down for a bid.
+- External: `IPricingStrategy.price(orderId, isBid, nft, tokenId, fills, data)`, read-only, 100k gas. Anyone may write one. `fills` lets a bid price change after each acquisition.
+- Bounds, independent of the strategy: a listing's ask is never below `floor`. A bid pays at most `maxPrice` and the unspent budget. A failing strategy blocks fills only.
+- Interfaces must label external strategies as unaudited third-party code and show the bounds as the guarantee.
 
-## 4. Pricing and order policy
+## 5. Economics (D024, D025, D033)
 
-1. V1: a deterministic linear decline by block timestamp from the start net amount to the floor net amount. Hold at the floor after the decline ends until order expiry; then the order is invalid. Inputs are fixed by a wallet signature. Never increase the seller's required amount through rounding.
-2. All settlement accounting and authorization are in WETH on Ethereum mainnet. The frontend may display an ETH equivalent because WETH and ETH are redeemable 1:1, but it must make the actual token payment clear. Optional native ETH convenience may be added only if straightforward and tested.
-3. One ERC721 per listing, one fill per listing, no partial fills, leverage, complex bids or multichain routing. Supported collections may initially be curated by the app for tested compatibility; avoid unnecessary mutable contract allowlists.
-4. Initial tentative total fee: 0.50% of available proceeds after mandatory external considerations. Tentative split: 0.30% executor and 0.20% protocol, with explicit recipients. Revisit these exact values using real fork gas and offer economics before implementation freeze. A keeper may skip uneconomic fills. Do not subsidize every sale or seize any extra spread.
-5. Seller authorization must enforce the maximum total fee, approved settlement protocol, proceeds recipient and minimum net. Fee settings must never change retroactively for a previously signed order. If a fully native Seaport signed listing cannot express the same guarantees, introduce the minimum bounded authorization wrapper needed.
-6. No arbitrary asset withdrawals by protocol owner or executor. Protocol revenue is delivered directly to its declared recipient. Prefer immutable or noncustodial versioned deployments over upgradeable custody.
+- Sale price = what the buyer pays. Royalty, protocol fee and executor fee come out of it; the rest is the seller's proceeds.
+- Ask = seller's minimum proceeds. Bid price = buyer's maximum payment.
+- Protocol fee 0.20% of the sale price, every sale. Executor fee 0.30% on `matchBid` and `fillOffer`. Referral 0.10% paid out of the protocol fee.
+- Royalty: ERC-2981 at the sale price on native sales (D032). None added on OpenSea fills.
+- Every split is visible before execution through the quote functions and in the `Sale` event.
 
-## 5. Architecture and Phase 0 technical gate
+## 6. Currencies (D031)
 
-Preferred path: Seaport signed dynamic price orders and native order matching. Alternative only if necessary: a small contract that verifies a seller's typed signed authorization, temporarily controls the NFT within ONE atomic transaction, settles a selected compatible Seaport offer, and atomically distributes all proceeds with enforceable seller minimum and fees. Its code must not be able to execute arbitrary external calls or retain user NFTs or proceeds after a successful fill.
+WETH always. Other ERC20s once the owner enables them, including artist and collection tokens. Fee-on-transfer tokens are rejected at deposit; rebasing tokens must not be enabled. Disabling stops new orders and fills; withdrawals continue.
 
-Before choosing the architecture, prove these cases on a pinned Ethereum mainnet fork using a REAL active signed OpenSea offer:
+## 7. Collection callbacks (D028)
 
-1. An NFT seller can authenticate a declining price and cancel the authorization onchain.
-2. A supported item or collection offer can be fulfilled with the real Seaport order signature, approvals, offer status, criteria resolver as needed, zone behavior and deployed contract addresses.
-3. A trade with available offer value above seller current minimum routes that surplus to the seller, save explicit fees, with no residual funds or NFT in the executor/settlement contract.
-4. Simulate changes to bid availability, owner balances, approvals, prices, royalties and races. Both legs must revert together on failure.
-5. Record the block number, order hash, data source, exact calldata route, before and after token balances, gas and any required permissions. Mocked orders test local logic but do not satisfy this gate.
+A collection that reports `ISaleObserver` through ERC-165 receives `onMarketSale(tokenId, seller, buyer, currency, price)` after each sale, with 100k gas and no value. It cannot reenter Market. A failure is ignored. Callbacks never carry settlement-critical state.
 
-Try native Seaport `matchAdvancedOrders` and `fulfillAdvancedOrder` in real tests. Test limitations before adopting either. Avoid writing a new protocol, a custom order book or generalized adapters when Seaport's existing functionality already satisfies the invariants.
+## 8. Security properties
 
-If real OpenSea offers cannot be filled from a contract under certain restricted zones or criteria, document exactly which order types are supported, exclude unsupported orders and keep progressing. Do not silently use unsafe direct fulfillment. A smaller honest product with item offers first is preferable to universal unsupported claims.
+1. An NFT leaves Market only to a sale's buyer or to its seller's chosen address on withdrawal.
+2. Market's balance in each currency covers every open bid's unspent budget; a call that would break this reverts.
+3. A seller receives at least the ask; a buyer pays at most its bound; bids never exceed budget, quantity or `maxPrice`.
+4. Cancellation and withdrawal depend on no strategy, callback, OpenSea or owner.
+5. One reentrancy lock covers every state-changing entry point, including the deposit hook.
+6. Market approves Seaport only for the listed token and the exact currency amount, inside `fillOffer`.
+7. No administrator can move escrowed assets, change fees or alter orders.
 
-## 6. Infrastructure
+Known risks: `SECURITY.md`.
 
-Build only what is needed:
+## 9. Infrastructure
 
-1. Solidity with Foundry for any minimal settlement logic, tests and reproducible fork harness.
-2. A small TypeScript Node worker using viem to discover offers, validate, price, simulate and submit profitable executions. The worker must be restart safe, idempotent and rate limit aware; it must never hold a user NFT across transactions.
-3. A responsive Next.js application with wallet connection, create listing, public listing detail and browse, active listings, cancellation and sales history.
-4. A minimal durable storage layer for signed orders and indexing. Prefer a simple single worker deployment and SQLite if adequate, upgrade storage only if actual hosting requirements demand it. No message bus, Kubernetes, microservices or complex generalized indexer in V1.
-5. Read only API access for offer discovery, with environment based secrets and an explicit no API key mode that surfaces lack of matching coverage rather than fabricating bids.
+- Foundry contracts and tests; pinned mainnet fork tests for real OpenSea offers.
+- One Next.js app and one keeper process sharing a SQLite file (D009). The chain is the source of truth: the app indexes `Listed`, `ListingUpdated`, `BidCreated`, `Cancelled`, `Withdrawn` and `Sale` events.
+- The keeper matches listings with Market bids and with OpenSea offers when the fee covers gas. It is optional: anyone can run the same calls.
+- OpenSea API key needed for offer discovery and zone signatures (D021).
 
-The UI should be clean, mobile first and direct. Avoid a full marketplace with discovery rankings, gamification, recommendation engines or a new identity system. Use established NFT metadata sources; sanitize external metadata.
+## 10. Acceptance
 
-## 7. Security properties
+1. A seller lists in one transaction, sees the ask over time, cancels and withdraws without our service.
+2. A buyer buys through the app and directly through the contract.
+3. A holder sells into a bid; a listing matches a bid; bounds hold under fuzzing and invariants.
+4. Real OpenSea offers fill from escrow on a pinned fork with exact splits.
+5. The app and keeper run end to end on a local fork.
+6. Independent review findings resolved; gas and economic bounds recorded; no claim of audit or launch.
 
-1. Seller authorization is bound to chain id, verifying contract, NFT contract, token id, seller, proceeds recipient, start, floor, times, unique nonce and fee limit; every successful fill consumes it once.
-2. Cancellation is effective onchain and works even if the hosted service is down. Show what happens to approvals after cancellation.
-3. Noncustodial in normal state; custody, if unavoidable, exists only during the single execution transaction and never survives a revert or successful fill.
-4. Reject reentrancy, untrusted callbacks, malicious NFT transfer hooks, arbitrary target calls, counterfeit Seaport addresses, bad consideration tokens, delegated approvals and unexpected wrapped native token behavior.
-5. Only validate funds that actually arrive and are distributable in the execution. Prevent executor, protocol or third party from capturing unallocated surplus; prevent stranded funds or NFTs. Use precise balance and NFT transfer assertions in tests.
-6. Test canceled, expired, filled, replayed, chain spoofed, transferred or approval revoked orders; malformed signatures, criteria proofs, restricted zones, royalties, varying gas, front running and competing fills. No ability for an administrator to alter a signed minimum or drain assets.
-7. Investigate MEV and failing transaction gas economics; keepers may use private submission, but the contract must be safe through the public mempool too.
-8. No deployment with real funds before independent review and explicit authorization. Any unaddressed severe finding means not launch ready.
+## 11. Exclusions
 
-## 8. Economic and operational requirements
-
-Measure profitability for matching orders of 0.05, 0.1, 0.5, 1, 5 and 10 ETH equivalent across realistic gas/base fee regimes. Include Seaport execution, NFT approvals, any external royalty considerations, API access, worker overhead and protocol/executor revenue. Derive the minimum economically viable fill threshold instead of assuming small trades are profitable.
-
-Measure seller outcomes against accepting an available bid immediately and listing at a fixed price. Do not claim declining auctions maximize sale proceeds. Estimate how often the external matching path would actually add a fill, using real observable offer snapshots if obtainable, and label sparse evidence honestly.
-
-The worker must respect cancelability, RPC failures, stale data, stuck transactions, nonce replacement, transaction confirmation, reorgs and throttling. Provide metrics/logs for matching candidates, submitted txs, successful txs, reverted txs, net proceeds and revenue. It can stop without freezing seller cancellations or valid buyer fulfillment.
-
-## 9. Acceptance criteria
-
-1. A seller can list an NFT without transferring it to the protocol, see its price decline, cancel irrevocably onchain, and buy/sell can never execute beyond authorization.
-2. A buyer can purchase directly through a tested route.
-3. A real Seaport offer can be fulfilled atomically on a fork with seller net proceeds and fee distributions verified exactly, or the product explicitly documents and scopes a supported alternative after a failed POC.
-4. The own keeper completes an eligible fill, a third party can perform a permissionless fill, and invalid offers fail atomically.
-5. A complete, usable responsive frontend and service exist with setup/deployment instructions, unit, integration, fork, adversarial and end to end tests.
-6. An independent review's actionable findings are resolved; gas and execution profitability boundaries are documented; no claim of formal audit or real launch is made.
-
-## 10. Exclusions
-
-No ERC20 selling product; no native token; no CC flywheel; no yield, loans, NFT fractions, auction bids collected in a new pool, liquidity mining, artificial scarcity, generalized arbitrary call router, complex governance, perpetual keeper subsidies, mobile app, multi chain support, or promises of guaranteed execution.
-
-## 11. Sources to verify at implementation time
-
-1. Seaport documentation: https://github.com/ProjectOpenSea/seaport/blob/main/docs/SeaportDocumentation.md
-2. Seaport interface and advanced matching: https://docs.opensea.io/docs/seaport-interface
-3. OpenSea collection offer discovery: https://docs.opensea.io/reference/get_offers_collection
-4. OpenSea offer fulfillment payload: https://docs.opensea.io/reference/generate_offer_fulfillment_data_v2
-5. Official Ponytail instructions: https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md
-
-These sources establish available capabilities, not proof that the proposed exact composition of calls works. The fork POC supplies that proof.
+ERC1155, trait (merkle) bids, buying OpenSea listings for a bid, Blur, cross-chain, a token, governance, upgradeability, and guarantees of execution.

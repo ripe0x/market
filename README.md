@@ -1,23 +1,34 @@
 # Market
 
-A simple, noncustodial way to sell an Ethereum NFT without repeatedly repricing it.
+Sell an Ethereum NFT at a price that falls until it sells.
 
-The seller sets a starting price, a minimum acceptable net price and a schedule. The asking price declines over time. Buyers can purchase directly. A small matcher also checks existing onchain offers, beginning with OpenSea Seaport offers, and executes an eligible sale atomically when it can meet the seller's terms. The seller receives the net proceeds from the executed bid after disclosed fees, including any amount above the current minimum.
+The seller signs a Seaport listing: a start price, a floor, and how long the fall takes. The NFT stays in the seller's wallet. Anyone can buy at the current price. A keeper also sells the listing into existing OpenSea offers when one covers the current price; the seller then gets everything the offer pays beyond its own fees, minus 0.5%.
 
-This is a standalone project. No CC integration, native token or new pool of liquidity is required.
+## How it works
 
-## Read first
+- `contracts/Market.sol` is the listing's Seaport zone and its only fulfiller. Seaport skips zone checks only when the zone itself calls, so a listing restricted to Market can only fill through `Market.buy` or `Market.matchOffer`. Market holds no approvals, no funds between transactions, and has no owner.
+- `app/` is a Next.js app (browse, sell, listing, yours) and the keeper (`app/keeper/run.ts`), sharing one SQLite file.
 
-1. [CLAUDE.md](CLAUDE.md)
-2. [Functional spec](docs/FUNCTIONAL_SPEC.md)
-3. [Roadmap](docs/ROADMAP.md)
-4. [Decisions and owner review](docs/DECISIONS.md)
-5. [Current status](docs/STATUS.md)
+## Start
 
-The first engineering gate is proving that a real, signed OpenSea offer can be settled atomically against a seller authorization on a pinned Ethereum mainnet fork while enforcing the seller's net proceeds. The specification does not assume this has already been proven.
+```bash
+git submodule update --init && (cd app && npm ci)
+```
 
-## Reference implementation targets
+```bash
+scripts/fork.sh
+```
 
-Use established Seaport functionality before introducing custom settlement contracts. Build a small web application, one matcher worker and the least onchain authorization or settlement code needed. Research and adopt the official Ponytail instructions to keep the implementation compact without taking shortcuts on security.
+Opens a local mainnet fork with Market deployed, two seeded NFTs and local test offers, the app on http://localhost:3000 and the keeper.
 
-Nothing is deployed. This package contains specifications only.
+## Docs
+
+1. [Functional spec](docs/FUNCTIONAL_SPEC.md)
+2. [Phase 0 evidence](docs/PHASE0_EVIDENCE.md)
+3. [Decisions and owner review](docs/DECISIONS.md)
+4. [Security](docs/SECURITY.md)
+5. [Economics](docs/ECONOMICS.md)
+6. [Operations](docs/OPERATIONS.md)
+7. [Status](docs/STATUS.md)
+
+Nothing is deployed. Not audited.
