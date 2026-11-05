@@ -17,6 +17,7 @@ Exploratory implementation, complete for the first milestone: the core, four exa
 | Composition (sale matched into bid) | Test only (`Matcher` in `test/Compose.t.sol`) |
 | Filler-side receipt checks | Test only: guarded contract buyer (`test/Compose.t.sol`), EIP-7702 delegated EOA (`test/Eip7702Filler.t.sol`) |
 | Local demo | `script/demo.sh` runs all four examples on anvil |
+| CI | `.github/workflows/test.yml`: `forge build --sizes` and `forge test` on pull requests and pushes to `main`, Foundry v1.8.1 |
 | Deployment | `script/Deploy.s.sol` simulated locally and against mainnet RPC; never broadcast |
 | Frontend, indexer, keeper | Not built (out of scope for this milestone) |
 
