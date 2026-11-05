@@ -14,9 +14,10 @@ pragma solidity ^0.8.28;
 ///
 /// It holds nothing, has no owner, needs no approvals and reads other contracts only with
 /// `staticcall`. Snapshots live in transient storage keyed by the caller, so only the account
-/// that took one can use it, and they vanish when the transaction ends. It compares numbers and
-/// bytes; it cannot tell what a query means. Query the contract that records what you were
-/// promised (the token or NFT you are buying), never the order or its policy.
+/// that took one can use it; each serves one `requireIncrease`, and all vanish when the
+/// transaction ends. It compares numbers and bytes; it cannot tell what a query means. Query
+/// the contract that records what you were promised (the token or NFT you are buying), never
+/// the order or its policy.
 contract FillVerifier {
     error QueryFailed();
     error NoSnapshot();
@@ -35,14 +36,16 @@ contract FillVerifier {
     }
 
     /// @notice Revert unless `target` now returns at least `minimum` more for `query` than at
-    /// the caller's snapshot of the same query.
-    function requireIncrease(address target, bytes calldata query, uint256 minimum) external view {
+    /// the caller's snapshot of the same query. Uses up the snapshot, so a second check needs a
+    /// fresh one: otherwise two fills could both be judged against the first one's baseline.
+    function requireIncrease(address target, bytes calldata query, uint256 minimum) external {
         bytes32 slot = _slot(target, query);
         uint256 before;
         uint256 taken;
         assembly ("memory-safe") {
             before := tload(slot)
             taken := tload(add(slot, 1))
+            tstore(add(slot, 1), 0)
         }
         if (taken == 0) revert NoSnapshot();
         uint256 value = _uint(target, query);

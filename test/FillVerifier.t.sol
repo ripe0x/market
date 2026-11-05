@@ -124,6 +124,20 @@ contract FillVerifierTest is Test {
         both.run(t, d);
     }
 
+    /// A snapshot serves one check. Reusing it after a second fill would compare against the
+    /// first fill's baseline, so it is refused instead (review finding G1).
+    function test_snapshotIsUsedUp() public {
+        bytes memory mint1 = _mint(address(alice), 1);
+        address[] memory t = new address[](4);
+        bytes[] memory d = new bytes[](4);
+        (t[0], d[0]) = (address(verifier), _snapshot(aliceBalance));
+        (t[1], d[1]) = (address(token), mint1);
+        (t[2], d[2]) = (address(verifier), _requireIncrease(aliceBalance, 1));
+        (t[3], d[3]) = (address(verifier), _requireIncrease(aliceBalance, 1));
+        vm.expectRevert(FillVerifier.NoSnapshot.selector);
+        alice.run(t, d);
+    }
+
     /// A zero balance is a real snapshot, distinct from no snapshot.
     function test_zeroSnapshotCounts() public {
         bytes memory mint1 = _mint(address(alice), 1);
