@@ -52,7 +52,7 @@ The whole core is 139 lines of Solidity including comments, about 80 of them cod
 
 | Party | Can | Cannot |
 | --- | --- | --- |
-| Owner (the creator) | Outside fills: `execute` any call as the order (withdraw, revoke, recover anything); `close` the order. | Act during a fill. Change the policy or config. |
+| Owner (the creator) | `execute` any call as the order outside fills (withdraw, revoke, recover anything); `close` the order at any time. | `execute` during a fill. Change the policy or config. |
 | Policy | During a fill of an order bound to it: `execute` calls as that order. | Act at any other time. Act as any other order. |
 | Anyone | `fill`, on the policy's terms. Send assets to the order. | Anything else. |
 | The order itself | `close` itself (so a policy can end a single use order). | Escalate: a self call to `execute` during a fill is rejected. |
@@ -169,7 +169,7 @@ State that evolves with use can live in three places:
 2. In the policy, keyed by the order's address: Example 4 records each clearing price, time and count. Only an order can write its own key, because the key is `msg.sender`.
 3. In external contracts the order interacts with: Example 4's pool tracks how much of the grant has accrued.
 
-Example 4's bid rises with time, is capped by its capital, records what it actually paid, restarts at half that price, and keeps going as capital arrives in the order or the pool. Swapping in a different strategy contract and funding route gives a completely different bidder through the same policy (`test_substituteStrategyAndFunding`).
+Example 4's bid rises with time, is capped by its capital, records what it actually paid, restarts at half that price (never below its start price), and keeps going as capital arrives in the order or the pool. Swapping in a different strategy contract and funding route gives a completely different bidder through the same policy (`test_substituteStrategyAndFunding`).
 
 ## The four examples
 
@@ -178,7 +178,7 @@ All four use the same `Market` and `Order`, unchanged.
 | # | Policy | What it demonstrates | Tests |
 | --- | --- | --- | --- |
 | 1 | [`DutchAuction`](examples/DutchAuction.sol) | An NFT held by the order sells to any buyer for native ETH at a linearly falling price, split among payees, with refund of any excess. Single use; closes itself. | [DutchAuction.t.sol](test/DutchAuction.t.sol) |
-| 2 | [`TokenExchange`](examples/TokenExchange.sol) | ERC20 for ERC20 at a fixed rate, partial and repeatable fills, expiry. Payment is measured as the payee's actual balance change, so fee-on-transfer and false-returning tokens fail. | [TokenExchange.t.sol](test/TokenExchange.t.sol) |
+| 2 | [`TokenExchange`](examples/TokenExchange.sol) | ERC20 for ERC20 at a fixed rate, partial and repeatable fills, expiry. Payment and delivery are both measured as actual balance changes, so fee-on-transfer and false-returning tokens fail. | [TokenExchange.t.sol](test/TokenExchange.t.sol) |
 | 3 | [`PaintAction`](examples/PaintAction.sol) + [`Artwork`](examples/Artwork.sol) | Sells an operation: one repaint of an artwork, color chosen by the buyer from the creator's allowed set. The order holds the artwork's painter role temporarily; the fill paints, resigns the role and closes, so the authority cannot be reused. | [PaintAction.t.sol](test/PaintAction.t.sol) |
 | 4 | [`AcquisitionBid`](examples/AcquisitionBid.sol) + [strategies](examples/BidStrategies.sol) + [`CapitalPool`](examples/CapitalPool.sol) | A persistent, independently funded bid for any NFT of a collection. Price from a pluggable strategy, capped by capital and a maximum; records each clearing price; draws external capital that the funder can rate limit and revoke. | [AcquisitionBid.t.sol](test/AcquisitionBid.t.sol) |
 

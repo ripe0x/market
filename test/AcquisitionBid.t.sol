@@ -37,7 +37,8 @@ contract AcquisitionBidTest is Base {
         for (uint256 i = 1; i <= 5; ++i) {
             nft.mint(holder, i);
         }
-        // Starts at 1 ETH, rises 0.001 ETH per second, resets to half the clearing price,
+        // Starts at 1 ETH, rises 0.001 ETH per second, resets to half the clearing price but
+        // not below 1 ETH,
         // never above 5 ETH. Funded by 0.5 ETH in the order plus a pool grant of up to
         // 3 ETH that accrues at 0.002 ETH per second.
         config = _bidConfig(vault, 5 ether, rising, _risingParams(1 ether, 0.001 ether, 5000), address(pool));
@@ -87,7 +88,8 @@ contract AcquisitionBidTest is Base {
         assertEq(lastTime, block.timestamp);
         assertEq(count, 1);
 
-        // Next quote restarts at half the clearing price and rises again.
+        // Next quote restarts at half the clearing price (0.7), floored at the 1 ETH start, and
+        // rises again; capital is what binds here.
         assertEq(_current(), 0.1 ether); // limited by capital: 0.1 accrued
         skip(100);
         assertEq(_current(), 0.3 ether); // quote 0.8; capital 0.1 + 0.2 = 0.3
@@ -268,6 +270,20 @@ contract AcquisitionBidTest is Base {
         vm.expectRevert(Order.OrderClosed.selector);
         bid.fill(config, abi.encode(1, 0));
         vm.stopPrank();
+    }
+
+    /// A sale at price zero (say, of a worthless token from the collection) records a zero
+    /// clearing price, but the strategy never restarts below its start price.
+    function test_zeroPriceSaleCannotSuppressBid() public {
+        vm.deal(address(bid), 10 ether);
+        skip(1000);
+        assertEq(_current(), 2 ether);
+        _sellInto(holder, bid, config, 1, 0);
+        (uint128 lastPrice,,) = acquisition.state(address(bid));
+        assertEq(lastPrice, 0);
+        assertEq(_current(), 1 ether);
+        skip(500);
+        assertEq(_current(), 1.5 ether);
     }
 
     /// The operator can make the bid order fill itself, but the policy's rules still apply: the

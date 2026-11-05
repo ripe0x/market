@@ -76,7 +76,17 @@
 10. **CREATE2 collision gas.** Creating the same commitment twice reverts after consuming the gas given to the deployment.
 11. **Toolchain.** via-IR compilation and transient storage are relatively new; the code has been compiled with one compiler version only (0.8.30).
 12. **No fork tests.** The examples use local mock tokens and NFTs. No real mainnet assets or contracts were exercised. The deploy script has been simulated against mainnet RPC only.
+13. **Collection-wide bids pay for any token.** `AcquisitionBid` accepts every token of its collection at up to the current maximum, so sellers will offer the least valuable ones. A creator who cares needs a policy that narrows eligibility, for example to a token id range or an allowlist; a strategy cannot, since it never sees the token id.
 
 ## Review findings
 
-Pending independent AI review of commit `a50ff04`.
+Independent AI review (a separate agent given the code and the owner's requirements, not the author's conclusions) of `src/` and `examples/` at commit `a50ff04`. Not a human audit. Proof-of-concept tests: `test/review/ReviewPoC.t.sol`, 5 tests. No critical, high or medium findings.
+
+| # | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| F1 | Low (design) | The commitment binds the policy's address, not its behaviour; a mutable policy can change terms after a counterparty inspects the order (`test_mutablePolicyChangesTermsAfterCommit`) | Accepted and documented: D006, residual risk 2. Code-hash pinning would not help, since a proxy's code hash does not change on upgrade. |
+| F2 | Low | `TokenExchange` measured the payment leg by balance change but the delivery leg only by return value, so a fee-on-transfer `give` token delivered less than the filler paid for | Fixed: delivery is measured on the recipient and reverts `ShortDelivery` (`test_feeOnTransferDeliveryRejected`). |
+| F3 | Low (docs) | `CapitalPool`'s `cap` could be read as a lifetime budget; it limits only the amount claimable at one moment | Fixed: NatSpec now says lifetime draws are limited by `rate`, time and the pool's balance. |
+| F4 | Info | A collection-wide bid pays up to its current maximum for any token, including cheap ones; and a sale at price 0 reset `RisingStrategy`'s base to 0, suppressing the curve (`test_zeroPriceFillResetsStrategyBase`) | Fixed the reset: the base never restarts below `startPrice` (`test_zeroPriceSaleCannotSuppressBid`). Overpaying for cheap tokens is inherent to a collection-wide bid and is listed below as residual risk 13. |
+
+The reviewer also confirmed, with executed tests, cross-policy isolation, reentrancy safety of `CapitalPool.draw`, and that donating ETH to a bid order cannot extract more than the pool's grant.

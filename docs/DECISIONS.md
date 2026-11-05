@@ -36,11 +36,12 @@ Nothing else carried over. The new direction removes marketplace semantics, fees
 | D101 | Baseline | Policies act only through the calling order, take only from `caller`, key state by `msg.sender` and build every call themselves. | These are what keep a shared policy from becoming shared authority. Listed for authors in the README. |
 | D102 | Baseline | `DutchAuction` closes the order after a sale (about 22,000 gas). | Without closing, an NFT sent back to the order address would be for sale again at the end price. |
 | D103 | Baseline | Payments to configured payees are pushed in the fill. A reverting payee blocks fills. | Pull payments need per-payee state in the policy. The creator chooses payees; `test_rejectingPayeeBlocksSale` documents the effect. |
-| D104 | Baseline | `TokenExchange` measures payment as the payee's balance increase. | Trusting `transferFrom`'s return value misses fee-on-transfer tokens and self-payment. |
+| D104 | Baseline | `TokenExchange` measures payment as the payee's balance increase and delivery as the recipient's. | Trusting return values misses fee-on-transfer tokens and self-payment. Delivery checking was added after review finding F2. |
 | D105 | Baseline | `PaintAction` paints, then resigns the painter role and closes the order. `Artwork` clears the painter on transfer. | Leaving the role with a closed order would still let the order's owner paint through it; resigning means nothing is left to reuse. Clearing on transfer makes offers from a previous owner stale. |
 | D106 | Baseline | `AcquisitionBid` pays exactly the seller's asked price if it is within `min(strategy quote, maxPrice, capital)`, checks the recipient did not hold the token before and does after, then records the clearing price. | Paying the full current bid instead would let front-running reduce a seller's price silently; an explicit price either clears or reverts. The before-check stops self-delivery (`test_selfDeliveryRejected`). |
 | D107 | Baseline | `CapitalPool` grants stream from zero at `rate` up to `cap`, can be revoked, and pay only filling orders. | A grant starting full would allow an immediate burst. The pool is example code, not part of Market. |
 | D108 | Baseline | Bid strategies are separate `view` contracts chosen in config. | Shows an application can substitute pricing without touching Market or the policy (`test_substituteStrategyAndFunding`). |
+| D109 | Baseline | `RisingStrategy` restarts at `resetBps` of the clearing price but never below `startPrice`. | Review finding F4: a sale at price 0 otherwise suppressed the bid to 0. Reusing `startPrice` as the floor needed no new parameter. |
 
 ## Owner review
 

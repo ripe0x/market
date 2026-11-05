@@ -89,6 +89,19 @@ contract TokenExchangeTest is Base {
         assertEq(give.balanceOf(address(order)), 100e18);
     }
 
+    /// The filler is checked the same way: a fee-on-transfer token being sold would deliver less
+    /// than the filler paid for, so the trade reverts.
+    function test_feeOnTransferDeliveryRejected() public {
+        FeeToken fee = new FeeToken();
+        (Order order, bytes memory config) = _open(address(fee), address(take), 100e18);
+        vm.startPrank(buyer);
+        take.approve(address(order), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(TokenExchange.ShortDelivery.selector, 9.9e18, 10e18));
+        order.fill(config, abi.encode(10e18, buyer));
+        vm.stopPrank();
+        assertEq(take.balanceOf(buyer), 1000e18);
+    }
+
     function test_tokensWithoutReturnValuesWork() public {
         NoReturnToken nrGive = new NoReturnToken();
         NoReturnToken nrTake = new NoReturnToken();

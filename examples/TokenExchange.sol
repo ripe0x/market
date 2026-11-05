@@ -22,6 +22,7 @@ contract TokenExchange is PolicyBase {
 
     error Expired();
     error ShortPayment(uint256 received, uint256 owed);
+    error ShortDelivery(uint256 received, uint256 amount);
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
@@ -40,7 +41,11 @@ contract TokenExchange is PolicyBase {
         uint256 received = c.take.balanceOf(c.payee) - before;
         if (received < owed) revert ShortPayment(received, owed);
 
+        // Delivery is measured the same way, so the filler gets exactly `amount` or nothing.
+        before = c.give.balanceOf(recipient);
         _tokenCall(address(c.give), abi.encodeCall(IERC20.transfer, (recipient, amount)));
+        received = c.give.balanceOf(recipient) - before;
+        if (received < amount) revert ShortDelivery(received, amount);
         return abi.encode(owed);
     }
 

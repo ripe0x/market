@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import {IBidStrategy} from "./AcquisitionBid.sol";
 
 /// @notice Rises linearly with time. Before the first acquisition it starts at `startPrice` at
-/// `startTime`. After each one it restarts at `resetBps` of the clearing price.
+/// `startTime`. After each one it restarts at `resetBps` of the clearing price, but never
+/// below `startPrice`, so a sale at a token price of zero cannot suppress the curve.
 contract RisingStrategy is IBidStrategy {
     struct Params {
         uint256 startPrice;
@@ -21,6 +22,7 @@ contract RisingStrategy is IBidStrategy {
         Params memory p = abi.decode(params, (Params));
         (uint256 base, uint256 from) =
             count == 0 ? (p.startPrice, p.startTime) : (lastPrice * p.resetBps / 10_000, lastTime);
+        if (base < p.startPrice) base = p.startPrice;
         return block.timestamp <= from ? base : base + p.perSecond * (block.timestamp - from);
     }
 }
