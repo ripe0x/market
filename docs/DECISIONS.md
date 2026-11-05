@@ -49,7 +49,7 @@ Whole-transaction gas, each call in its own transaction (`forge test --match-pat
 | Owner closes | 44,173 | 29,755 | 46,994 | +2,821 |
 | Owner withdraws an NFT | 59,073 | 63,929 | 61,966 | +2,893 |
 
-(b) and (c) include the zero-price check added to `AcquisitionBid` on 2026-11-05 and (a) predates it; the check changes those fills by under 30 gas. Without the code-hash pin (D006), (c) creation is 6,559 lower and fills 301 lower.
+(b) and (c) include the zero-price check added to `AcquisitionBid` on 2026-11-05 and (a) predates it; the check changes those fills by under 30 gas. Without the code-hash pin (D006), (c) creation is 6,559 lower and fills 301 lower. These are the measurements behind D004, taken at commit `4a15d12`. The second revision of D003 (commit `dd71a9e`) leaves creation unchanged, lowers fills by 30 to 146 gas (function dispatch after the rename; `close` no longer reads the owner during a fill) and raises owner `close` to 47,129 (+135, it reads `filling` first) and owner withdrawal after closing to 64,080 (+2,114, `execute` reads the cold `closed` flag). Current figures are in [STATUS.md](STATUS.md).
 
 ### D006: what handler immutability can mean
 

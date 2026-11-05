@@ -55,7 +55,7 @@ The whole core is 206 lines of Solidity including comments, 117 of them code. It
 
 ### Why handlers are separate from orders
 
-1. **Reusable code.** One handler serves any number of orders. Hundreds of NFT sales can run the same audited `DutchAuction`, each with its own config.
+1. **Reusable code.** One handler serves any number of orders. Hundreds of NFT sales can run the same `DutchAuction`, each with its own config, and a reader who has checked it once has checked it for all of them.
 2. **Cheap orders.** An order is a 149-byte clone with no logic of its own, about 95,000 gas to create, because the behavior lives in a contract that already exists.
 3. **Isolated custody and authority.** Each order holds its own assets and permissions and accepts its handler only during its own fill. A handler holds nothing; it directs one order at a time through that order. Sharing a handler never shares assets, approvals or lifecycle.
 4. **Room to invent.** A new exchange behavior is a new handler, deployed by anyone without asking. Market never changes.

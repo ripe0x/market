@@ -137,3 +137,16 @@ Independent AI review of the clone change (commit `03c263f` against `4f2d19c`), 
 | G5 | Info | `requireIncrease` passes if the value rose for any reason (an unrelated transfer in, a rebasing token); `requireEqual` copies unbounded return data | Inherent to delta checks; documented in residual risk 3 and the README. |
 
 The reviewer also confirmed with executed tests that a front-runner cannot occupy a predicted order address, that a handler shared by two clones cannot act on the sibling, and that a genuine 23-byte contract not starting with `0xef` is accepted as a handler.
+
+### Third review
+
+Independent AI review of the lifecycle change (commit `dd71a9e` against `4a15d12`), given the owner's requirements for the active and closed lifecycle and for shared handlers, not the author's conclusions. Not a human audit. Proof-of-concept tests: `test/review/LifecycleReviewPoC.t.sol`, 6 tests, all confirming properties. No critical, high, medium or low findings in the core.
+
+| # | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| H1 | Info | The owner of an active order cannot move anything it holds, even unrelated stray assets or while its handler is broken; the only lever is closing, which is permanent | By design (D003). A handler can offer a maintenance fill (`test_handlerCanAllowOwnerMaintenance`); otherwise the owner closes and recovers. Residual risk 19. |
+| H2 | Info | In the fill that closes an order, `closed` and `filling` are both true, so a grant gated on `filling()` (such as `CapitalPool`) can still be drawn until that fill returns | No change: only the handler can act in that window, which is authority the order already committed to it. SPEC now states that `filling` does not imply active, for authors of such integrations. |
+| H3 | Info | The implementation, and an EIP-7702 EOA delegated to it, cannot act as an order | Confirmed (`test_eoaDelegatedToImplementationIsInert`). |
+| H4 | Info | `CapitalPool` pays any granted address whose `filling()` returns true, so its safety rests on granting only real orders | Unchanged, example code. `CapitalPool`'s NatSpec now says to grant only addresses from `Market.Created`. |
+
+The reviewer confirmed with executed tests that an idle active order accepts nobody (fuzzed), that an owner's receive hook can neither close nor execute during a fill, that a handler keeps `execute` through the fill in which it closes the order and loses it afterwards, that a shared handler cannot reach a sibling that is not filling, and that a closed order's owner recovers the order's own ETH but cannot draw the pool. Not checked by the reviewer: the full suite, invariants and gas (run separately, STATUS.md), an EIP-7702 EOA delegated to a clone rather than the implementation, and third-party handlers beyond the examples.

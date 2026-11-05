@@ -103,7 +103,7 @@ ETH sent with `fill` is held by the order before step 6.
 | Closed, during the fill that closed it | The handler | The order itself (no effect) |
 | Closed, outside a fill | The owner | The owner (no effect) |
 
-A closed order cannot start a fill, so the third row exists only between a handler closing its order and that fill returning.
+A closed order cannot start a fill, so the third row exists only between a handler closing its order and that fill returning. In that window `filling` is true although the order is closed: an external contract that gates on `filling()` should treat it as "the handler is acting", not as "the order is active".
 
 ### `execute(target, value, data)`
 

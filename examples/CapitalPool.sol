@@ -12,7 +12,8 @@ import {ICapitalSource} from "./AcquisitionBid.sol";
 /// time and this pool's balance. An order can draw only while it is filling, so the order's
 /// handler can spend the grant and the order's owner cannot, before or after closing it.
 /// Funds stay here until drawn, and this pool's owner may withdraw or revoke at any time,
-/// independently of the order: a grant is a conditional permission, not escrow.
+/// independently of the order: a grant is a conditional permission, not escrow. Grant only
+/// addresses from `Market.Created`: any contract can claim to be filling.
 contract CapitalPool is ICapitalSource {
     struct Grant {
         uint128 rate;
