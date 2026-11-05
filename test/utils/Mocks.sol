@@ -5,7 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IPolicy, Order} from "../../src/Order.sol";
+import {IOrderHandler, Order} from "../../src/Order.sol";
 
 contract TestNFT is ERC721 {
     constructor() ERC721("Test", "TST") {}
@@ -77,8 +77,8 @@ contract FalseToken is TestToken("FALSE") {
     }
 }
 
-/// Records what an order passes to its policy and lets the test script the fill.
-contract ProbePolicy is IPolicy {
+/// Records what an order passes to its handler and lets the test script the fill.
+contract ProbeHandler is IOrderHandler {
     address public caller;
     uint256 public value;
     bytes public config;
@@ -100,8 +100,54 @@ contract ProbePolicy is IPolicy {
     }
 }
 
-/// A hostile policy: sends everything the order holds in ETH to its author.
-contract DrainPolicy is IPolicy {
+/// Runs a script taken from the fill's input. Each step is a call made either as the calling
+/// order, through `execute`, or by the handler itself. Forwarding calldata from input breaks the
+/// rules for handler authors on purpose: this stands in for any handler, honest or hostile, so
+/// tests can check what the core allows whatever the handler does. Counts fills per order.
+contract ScriptHandler is IOrderHandler {
+    struct Step {
+        bool asOrder;
+        address target;
+        uint256 value;
+        bytes data;
+    }
+
+    mapping(address order => uint256) public fills;
+
+    function onFill(address, uint256, bytes calldata, bytes calldata input) external returns (bytes memory) {
+        fills[msg.sender] += 1;
+        if (input.length == 0) return "";
+        Step[] memory steps = abi.decode(input, (Step[]));
+        for (uint256 i; i < steps.length; ++i) {
+            Step memory s = steps[i];
+            if (s.asOrder) {
+                Order(payable(msg.sender)).execute(s.target, s.value, s.data);
+            } else {
+                (bool ok, bytes memory ret) = s.target.call{value: s.value}(s.data);
+                if (!ok) {
+                    assembly ("memory-safe") {
+                        revert(add(ret, 0x20), mload(ret))
+                    }
+                }
+            }
+        }
+        return "";
+    }
+
+    /// One step as a fill input.
+    function script(bool asOrder, address target, uint256 value, bytes memory data)
+        external
+        pure
+        returns (bytes memory)
+    {
+        Step[] memory steps = new Step[](1);
+        steps[0] = Step(asOrder, target, value, data);
+        return abi.encode(steps);
+    }
+}
+
+/// A hostile handler: sends everything the order holds in ETH to its author.
+contract DrainHandler is IOrderHandler {
     address public immutable thief;
 
     constructor(address thief_) {
@@ -119,8 +165,8 @@ contract DrainPolicy is IPolicy {
     }
 }
 
-/// A hostile policy that keeps a reference to its order and tries to act later.
-contract StashPolicy is IPolicy {
+/// A hostile handler that keeps a reference to its order and tries to act later.
+contract StashHandler is IOrderHandler {
     Order public stashed;
 
     function onFill(address, uint256, bytes calldata, bytes calldata) external returns (bytes memory) {
@@ -133,16 +179,16 @@ contract StashPolicy is IPolicy {
     }
 }
 
-/// A policy that tries to fill its own order again from inside the fill.
-contract ReentrantPolicy is IPolicy {
+/// A handler that tries to fill its own order again from inside the fill.
+contract ReentrantHandler is IOrderHandler {
     function onFill(address, uint256, bytes calldata config, bytes calldata) external returns (bytes memory) {
         Order(payable(msg.sender)).fill(config, "");
         return "";
     }
 }
 
-/// A policy that always fails, standing in for a broken or hostile policy.
-contract RevertPolicy is IPolicy {
+/// A handler that always fails, standing in for a broken or hostile handler.
+contract RevertHandler is IOrderHandler {
     function onFill(address, uint256, bytes calldata, bytes calldata) external pure returns (bytes memory) {
         revert("broken");
     }

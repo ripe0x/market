@@ -10,7 +10,7 @@ import {RisingStrategy} from "../examples/BidStrategies.sol";
 import {CapitalPool} from "../examples/CapitalPool.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
-import {PolicyBase} from "../examples/PolicyBase.sol";
+import {HandlerBase} from "../examples/HandlerBase.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {TestNFT, TestToken} from "../test/utils/Mocks.sol";
 
@@ -42,10 +42,10 @@ contract Demo is Script {
         acquisitionBid();
     }
 
-    function _payees(address a, uint16 aBps, address b) internal pure returns (PolicyBase.Payee[] memory p) {
-        p = new PolicyBase.Payee[](2);
-        p[0] = PolicyBase.Payee(a, aBps);
-        p[1] = PolicyBase.Payee(b, 10_000 - aBps);
+    function _payees(address a, uint16 aBps, address b) internal pure returns (HandlerBase.Payee[] memory p) {
+        p = new HandlerBase.Payee[](2);
+        p[0] = HandlerBase.Payee(a, aBps);
+        p[1] = HandlerBase.Payee(b, 10_000 - aBps);
     }
 
     function nftSale() internal {
@@ -91,10 +91,21 @@ contract Demo is Script {
         take.mint(BUYER, 200e18);
         take.approve(address(order), 200e18);
         order.fill(config, abi.encode(40e18, BUYER));
-        order.fill(config, abi.encode(60e18, BUYER));
+        order.fill(config, abi.encode(20e18, BUYER));
         vm.stopBroadcast();
-        require(give.balanceOf(BUYER) == 100e18 && take.balanceOf(SELLER) == 200e18, "exchange");
-        console.log("  two fills: buyer got 100 GIVE, seller got 200 TAKE");
+        require(give.balanceOf(BUYER) == 60e18 && take.balanceOf(SELLER) == 120e18, "exchange");
+        console.log("  two fills: buyer got 60 GIVE, seller got 120 TAKE");
+
+        // The seller may add inventory while the order is active, but takes it out only by
+        // closing the order first.
+        vm.startBroadcast(SELLER);
+        give.mint(SELLER, 10e18);
+        give.transfer(address(order), 10e18);
+        order.close();
+        order.execute(address(give), 0, abi.encodeCall(give.transfer, (SELLER, 50e18)));
+        vm.stopBroadcast();
+        require(order.closed() && give.balanceOf(SELLER) == 50e18, "recover");
+        console.log("  topped up 10 GIVE, then closed and recovered the unsold 50 GIVE");
     }
 
     function artworkAction() internal {

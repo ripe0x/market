@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 import {Base} from "./utils/Base.sol";
 
 /// A contract written with no knowledge of Market: only its ringer may ring it.
@@ -22,7 +22,7 @@ contract Bell {
 }
 
 /// The README's example of a new order type, verbatim.
-contract BellPolicy is IPolicy {
+contract BellHandler is IOrderHandler {
     function onFill(address, uint256 value, bytes calldata config, bytes calldata) external returns (bytes memory) {
         (address bell, uint256 fee, address payee) = abi.decode(config, (address, uint256, address));
         require(value == fee, "fee");
@@ -38,9 +38,9 @@ contract NewOrderTypeTest is Base {
     function test_payToRingBell() public {
         vm.prank(seller);
         Bell bell = new Bell();
-        BellPolicy policy = new BellPolicy();
+        BellHandler handler = new BellHandler();
         bytes memory config = abi.encode(address(bell), 0.01 ether, seller);
-        Order order = _create(seller, policy, config);
+        Order order = _create(seller, handler, config);
         vm.prank(seller);
         bell.setRinger(address(order));
 

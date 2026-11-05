@@ -121,6 +121,24 @@ contract PaintActionTest is Base {
         order.fill{value: 0.5 ether}(config, abi.encode(uint8(3)));
     }
 
+    /// Cancelling the offer does not revoke the painter role: closing stops fills and nothing
+    /// else. The owner then resigns the role through the closed order (or, as the token's
+    /// owner, could clear it on the artwork directly).
+    function test_closingKeepsTheRoleUntilRevoked() public {
+        (Order order, bytes memory config) = _offer();
+        vm.startPrank(artist);
+        order.close();
+        assertEq(art.painterOf(ID), address(order));
+        order.execute(address(art), 0, abi.encodeCall(Artwork.resign, (ID)));
+        vm.stopPrank();
+        assertEq(art.painterOf(ID), address(0));
+        vm.prank(buyer);
+        vm.expectRevert(Order.OrderClosed.selector);
+        order.fill{value: 0.5 ether}(config, abi.encode(uint8(3)));
+    }
+
+    /// An active order commits only the authority it holds while it holds it: the artwork's
+    /// owner keeps its own rights in the artwork and can take the role back at any time.
     function test_creatorRevokesWithoutTouchingTheOrder() public {
         (Order order, bytes memory config) = _offer();
         vm.prank(artist);
@@ -141,10 +159,10 @@ contract PaintActionTest is Base {
         vm.prank(artist);
         art.setPainter(8, address(b));
 
-        // Order a holds authority over token 7 only. Even its owner acting through it cannot
-        // paint token 8.
+        // Order a is active, so not even its owner can act through it; its handler paints only
+        // the token in a's config.
         vm.prank(artist);
-        vm.expectRevert(Artwork.NotAllowed.selector);
+        vm.expectRevert(Order.Unauthorized.selector);
         a.execute(address(art), 0, abi.encodeCall(Artwork.paint, (8, 3)));
 
         vm.prank(buyer);

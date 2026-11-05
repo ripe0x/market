@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Order} from "../src/Order.sol";
-import {PolicyBase} from "../examples/PolicyBase.sol";
+import {HandlerBase} from "../examples/HandlerBase.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {Base} from "./utils/Base.sol";
 import {FalseToken, FeeToken, NoReturnToken, TestToken} from "./utils/Mocks.sol";
@@ -51,8 +51,10 @@ contract TokenExchangeTest is Base {
         vm.expectRevert();
         order.fill(config, abi.encode(1, buyer));
 
-        // The owner tops the order up and it trades again: the same order persists.
-        give.mint(address(order), 10e18);
+        // The owner tops the active order up and it trades again: the same order persists.
+        give.mint(seller, 10e18);
+        vm.prank(seller);
+        give.transfer(address(order), 10e18);
         assertEq(_fill(order, config, address(take), 10e18), 15e18);
     }
 
@@ -72,7 +74,7 @@ contract TokenExchangeTest is Base {
     function test_rejectsEth() public {
         (Order order, bytes memory config) = _open(address(give), address(take), 100e18);
         vm.prank(buyer);
-        vm.expectRevert(PolicyBase.UnexpectedETH.selector);
+        vm.expectRevert(HandlerBase.UnexpectedETH.selector);
         order.fill{value: 1}(config, abi.encode(1e18, buyer));
     }
 
@@ -125,7 +127,7 @@ contract TokenExchangeTest is Base {
         (Order order, bytes memory config) = _open(address(f), address(take), 100e18);
         vm.startPrank(buyer);
         take.approve(address(order), type(uint256).max);
-        vm.expectRevert(abi.encodeWithSelector(PolicyBase.TokenCallFailed.selector, address(f)));
+        vm.expectRevert(abi.encodeWithSelector(HandlerBase.TokenCallFailed.selector, address(f)));
         order.fill(config, abi.encode(10e18, buyer));
         vm.stopPrank();
         assertEq(take.balanceOf(buyer), 1000e18); // payment rolled back
@@ -168,11 +170,22 @@ contract TokenExchangeTest is Base {
         assertEq(take.balanceOf(buyer), 1000e18);
     }
 
-    function test_ownerWithdrawsUnsold() public {
-        (Order order,) = _open(address(give), address(take), 100e18);
-        vm.prank(seller);
-        order.execute(address(give), 0, abi.encodeCall(IERC20.transfer, (seller, 100e18)));
-        assertEq(give.balanceOf(seller), 100e18);
+    /// Inventory is committed while the order is active: the owner withdraws it by closing
+    /// first, which also stops further fills. TokenExchange has no maintenance action.
+    function test_withdrawingInventoryRequiresClosing() public {
+        (Order order, bytes memory config) = _open(address(give), address(take), 100e18);
+        _fill(order, config, address(take), 40e18);
+        bytes memory withdraw = abi.encodeCall(IERC20.transfer, (seller, 60e18));
+        vm.startPrank(seller);
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.execute(address(give), 0, withdraw);
+        order.close();
+        order.execute(address(give), 0, withdraw);
+        vm.stopPrank();
+        assertEq(give.balanceOf(seller), 60e18);
+        vm.prank(buyer);
+        vm.expectRevert(Order.OrderClosed.selector);
+        order.fill(config, abi.encode(1, buyer));
     }
 
     function testFuzz_payeeAlwaysReceivesOwed(uint128 amount, uint64 giveAmt, uint64 takeAmt) public {

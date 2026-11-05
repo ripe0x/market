@@ -2,12 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {Market} from "../src/Market.sol";
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 import {Base} from "./utils/Base.sol";
-import {ProbePolicy, TestMulti, TestToken} from "./utils/Mocks.sol";
+import {ProbeHandler, TestMulti, TestToken} from "./utils/Mocks.sol";
 
 /// During one order's fill, tries to move ETH out of another order. Both may be bound to it.
-contract ReachPolicy is IPolicy {
+contract ReachHandler is IOrderHandler {
     function onFill(address, uint256, bytes calldata, bytes calldata input) external returns (bytes memory) {
         (Order target, address to, uint256 amount) = abi.decode(input, (Order, address, uint256));
         return target.execute(to, amount, "");
@@ -17,14 +17,14 @@ contract ReachPolicy is IPolicy {
 /// Orders are ERC-1167 clones of one fixed implementation. These tests check that each clone
 /// is still its own account with its own terms, storage and authority.
 contract CloneTest is Base {
-    ProbePolicy probe;
-    ReachPolicy reach;
+    ProbeHandler probe;
+    ReachHandler reach;
     Order implementation;
 
     function setUp() public override {
         super.setUp();
-        probe = new ProbePolicy();
-        reach = new ReachPolicy();
+        probe = new ProbeHandler();
+        reach = new ReachHandler();
         implementation = Order(payable(market.implementation()));
     }
 
@@ -45,8 +45,8 @@ contract CloneTest is Base {
         );
         assertEq(address(order).code, expected);
         assertEq(order.owner(), seller);
-        assertEq(address(order.policy()), address(probe));
-        assertEq(order.policyCodehash(), address(probe).codehash);
+        assertEq(address(order.handler()), address(probe));
+        assertEq(order.handlerCodehash(), address(probe).codehash);
         assertEq(order.configHash(), keccak256("cfg"));
 
         (bool ok,) = address(order)
@@ -64,7 +64,7 @@ contract CloneTest is Base {
         assertEq(order.configHash(), keccak256(config));
     }
 
-    /// The same policy, config and salt under two owners are two unrelated accounts.
+    /// The same handler, config and salt under two owners are two unrelated accounts.
     function test_sameTermsDifferentOwnersAreSeparateAccounts() public {
         vm.prank(seller);
         Order a = market.create(probe, "x", 0);
@@ -95,15 +95,15 @@ contract CloneTest is Base {
         assertFalse(b.closed());
         assertEq(address(b).balance, 0);
 
-        // `filling` is per clone too: ProbePolicy records the calling order's flag.
+        // `filling` is per clone too: ProbeHandler records the calling order's flag.
         vm.prank(buyer);
         b.fill("", "");
         assertTrue(probe.sawFilling());
         assertFalse(a.filling());
     }
 
-    /// Two orders bound to the same policy: during A's fill the policy can act as A, never as B.
-    function test_sharedPolicyCannotCrossOrders() public {
+    /// Two orders bound to the same handler: during A's fill the handler can act as A, never as B.
+    function test_sharedHandlerCannotCrossOrders() public {
         Order a = _create(seller, reach, "");
         Order b = _create(buyer, reach, "");
         vm.deal(address(a), 1 ether);
@@ -118,7 +118,7 @@ contract CloneTest is Base {
         assertEq(seller.balance, 1 ether);
     }
 
-    /// An approval to one clone cannot be spent through a sibling clone with the same policy.
+    /// An approval to one clone cannot be spent through a sibling clone with the same handler.
     function test_approvalToSiblingIsUnusable() public {
         TestToken token = new TestToken("T");
         token.mint(seller, 100);
@@ -139,12 +139,13 @@ contract CloneTest is Base {
         vm.expectRevert(Order.NotAnOrder.selector);
         implementation.owner();
         vm.expectRevert(Order.NotAnOrder.selector);
-        implementation.policy();
+        implementation.handler();
         vm.expectRevert(Order.NotAnOrder.selector);
         implementation.configHash();
         vm.expectRevert(Order.NotAnOrder.selector);
         implementation.fill("", "");
-        vm.expectRevert(Order.NotAnOrder.selector);
+        // `execute` refuses before reading terms: the implementation is never closed or filling.
+        vm.expectRevert(Order.Unauthorized.selector);
         implementation.execute(attacker, 0, "");
         vm.expectRevert(Order.NotAnOrder.selector);
         implementation.close();
@@ -176,29 +177,29 @@ contract CloneTest is Base {
         assertEq(market.implementation(), address(implementation));
     }
 
-    // ---- the policy code commitment ----
+    // ---- the handler code commitment ----
 
-    /// If the policy's code is replaced (possible only for code destroyed in its creation
-    /// transaction and redeployed), fills stop and the owner keeps recovery.
-    function test_fillRefusesReplacedPolicyCode() public {
+    /// If the handler's code is replaced (possible only for code destroyed in its creation
+    /// transaction and redeployed), fills stop and the owner closes and recovers.
+    function test_fillRefusesReplacedHandlerCode() public {
         Order order = _create(seller, probe, "");
         vm.deal(address(order), 1 ether);
         vm.etch(address(probe), address(reach).code);
-        vm.expectRevert(Order.PolicyCodeChanged.selector);
+        vm.expectRevert(Order.HandlerCodeChanged.selector);
         order.fill("", "");
 
         vm.startPrank(seller);
-        order.execute(seller, 1 ether, "");
         order.close();
+        order.execute(seller, 1 ether, "");
         vm.stopPrank();
         assertEq(seller.balance, 1 ether);
     }
 
-    /// An EIP-7702 account's code is a pointer its key holder can change, so it cannot be a policy.
+    /// An EIP-7702 account's code is a pointer its key holder can change, so it cannot be a handler.
     function test_createRejectsDelegatedAccount() public {
         address delegated = makeAddr("delegated");
         vm.etch(delegated, abi.encodePacked(hex"ef0100", address(probe)));
-        vm.expectRevert(Market.DelegatedPolicy.selector);
-        market.create(IPolicy(delegated), "", 0);
+        vm.expectRevert(Market.DelegatedHandler.selector);
+        market.create(IOrderHandler(delegated), "", 0);
     }
 }

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Order} from "../src/Order.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
-import {PolicyBase} from "../examples/PolicyBase.sol";
+import {HandlerBase} from "../examples/HandlerBase.sol";
 import {Base} from "./utils/Base.sol";
 import {Reenterer, Rejecter} from "./utils/Mocks.sol";
 
@@ -75,14 +75,36 @@ contract DutchAuctionTest is Base {
         order.fill{value: 10 ether}(config, abi.encode(buyer));
     }
 
-    /// Withdrawing alone also ends the sale: the policy cannot deliver what the order lacks.
-    function test_recoverWithoutCloseMakesFillRevert() public {
+    /// While the sale is active its NFT stays committed to it: the owner cannot withdraw it
+    /// without closing, so an open sale never points at an NFT taken out from under it.
+    function test_ownerCannotWithdrawWhileActive() public {
         (Order order, bytes memory config) = _listDutch(seller, 1);
         vm.prank(seller);
+        vm.expectRevert(Order.Unauthorized.selector);
         order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(order), seller, 1)));
+        assertEq(nft.ownerOf(1), address(order));
+        vm.prank(buyer);
+        order.fill{value: 10 ether}(config, abi.encode(buyer));
+        assertEq(nft.ownerOf(1), buyer);
+        assertEq(seller.balance, 10 ether);
+    }
+
+    /// The sale moves the NFT out of the order, so it completes only if the order holds it. An
+    /// order that was merely approved, or never received the NFT, cannot sell.
+    function test_saleRequiresTheOrderToHoldTheNFT() public {
+        nft.mint(seller, 1);
+        bytes memory config = abi.encode(_dutchConfig(1, seller));
+        Order order = _create(seller, dutch, config);
         vm.prank(buyer);
         vm.expectRevert();
         order.fill{value: 10 ether}(config, abi.encode(buyer));
+
+        vm.prank(seller);
+        nft.approve(address(order), 1);
+        vm.prank(buyer);
+        vm.expectRevert();
+        order.fill{value: 10 ether}(config, abi.encode(buyer));
+        assertEq(nft.ownerOf(1), seller);
         assertEq(buyer.balance, 100 ether);
     }
 
@@ -91,13 +113,16 @@ contract DutchAuctionTest is Base {
         bytes memory take = abi.encodeCall(IERC721.transferFrom, (address(order), attacker, 1));
         vm.prank(attacker);
         vm.expectRevert(Order.Unauthorized.selector);
+        order.close();
+        vm.prank(seller);
+        order.close();
+        vm.prank(attacker);
+        vm.expectRevert(Order.Unauthorized.selector);
         order.execute(address(nft), 0, take);
         vm.prank(address(dutch));
         vm.expectRevert(Order.Unauthorized.selector);
         order.execute(address(nft), 0, take);
-        vm.prank(attacker);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.close();
+        assertEq(nft.ownerOf(1), address(order));
     }
 
     /// The buyer cannot change the price, the NFT or the payees: they are committed in config.
@@ -146,15 +171,15 @@ contract DutchAuctionTest is Base {
     function test_payeesMustTotalFullAmount() public {
         nft.mint(seller, 1);
         DutchAuction.Config memory c = _dutchConfig(1, seller);
-        c.payees = new PolicyBase.Payee[](2);
-        c.payees[0] = PolicyBase.Payee(seller, 6000);
-        c.payees[1] = PolicyBase.Payee(royalty, 3000);
+        c.payees = new HandlerBase.Payee[](2);
+        c.payees[0] = HandlerBase.Payee(seller, 6000);
+        c.payees[1] = HandlerBase.Payee(royalty, 3000);
         bytes memory config = abi.encode(c);
         Order order = _create(seller, dutch, config);
         vm.prank(seller);
         nft.transferFrom(seller, address(order), 1);
         vm.prank(buyer);
-        vm.expectRevert(PolicyBase.BadPayees.selector);
+        vm.expectRevert(HandlerBase.BadPayees.selector);
         order.fill{value: 10 ether}(config, abi.encode(buyer));
     }
 

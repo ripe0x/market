@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 /// @title FillVerifier
-/// @notice Optional periphery for fillers who do not trust an order's policy. Market does not
+/// @notice Optional periphery for fillers who do not trust an order's handler. Market does not
 /// use it. An account that can make several calls atomically (a contract, an EIP-7702 or other
 /// smart wallet, an EIP-5792 atomic batch) checks the outcome of its own fill in the same
 /// transaction, so a fill that does not deliver reverts everything, payment and approvals
@@ -17,7 +17,7 @@ pragma solidity ^0.8.28;
 /// that took one can use it; each serves one `requireIncrease`, and all vanish when the
 /// transaction ends. It compares numbers and bytes; it cannot tell what a query means. Query
 /// the contract that records what you were promised (the token or NFT you are buying), never
-/// the order or its policy.
+/// the order or its handler.
 contract FillVerifier {
     error QueryFailed();
     error NoSnapshot();

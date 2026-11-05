@@ -5,8 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
-import {IPolicy, Order} from "../src/Order.sol";
-import {PolicyBase} from "../examples/PolicyBase.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
+import {HandlerBase} from "../examples/HandlerBase.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {AcquisitionBid, ICapitalSource, IBidStrategy} from "../examples/AcquisitionBid.sol";
@@ -16,7 +16,7 @@ import {TestNFT, TestToken} from "./utils/Mocks.sol";
 
 /// Drives several unrelated orders, their counterparties and an attacker through random
 /// sequences, and keeps ghost accounting of every legitimate movement.
-contract Handler is Test {
+contract Driver is Test {
     Market public market = new Market();
     DutchAuction public dutch = new DutchAuction();
     TokenExchange public exchange = new TokenExchange();
@@ -58,13 +58,14 @@ contract Handler is Test {
 
     bool public attackSucceeded;
     uint256 public attacks;
+    bool public ownerBypassed;
 
     constructor() {
         vm.warp(1_000_000);
         for (uint256 i; i < 2; ++i) {
             nft.mint(sellers[i], i);
-            PolicyBase.Payee[] memory p = new PolicyBase.Payee[](1);
-            p[0] = PolicyBase.Payee(sellers[i], 10_000);
+            HandlerBase.Payee[] memory p = new HandlerBase.Payee[](1);
+            p[0] = HandlerBase.Payee(sellers[i], 10_000);
             saleConfigs[i] = abi.encode(
                 DutchAuction.Config(nft, i, 5 ether, 1 ether, block.timestamp, block.timestamp + 10_000, p)
             );
@@ -177,6 +178,21 @@ contract Handler is Test {
         }
     }
 
+    /// An owner tries to take something its active order holds, without closing it. Any
+    /// success is recorded.
+    function ownerTakesFromActive(uint256 which) external {
+        Order[4] memory orders = [sales[0], sales[1], ex, bid];
+        address[4] memory owners = [sellers[0], sellers[1], operator, operator];
+        uint256 w = bound(which, 0, 3);
+        if (orders[w].closed()) return;
+        (address target, uint256 value, bytes memory data) = w < 2
+            ? (address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(orders[w]), owners[w], w)))
+            : w == 2 ? (address(give), 0, abi.encodeCall(IERC20.transfer, (owners[w], 1))) : (owners[w], 1, bytes(""));
+        vm.prank(owners[w]);
+        (bool ok,) = address(orders[w]).call(abi.encodeCall(Order.execute, (target, value, data)));
+        if (ok) ownerBypassed = true;
+    }
+
     /// The attacker tries every authority it does not have. Any success is recorded.
     function attack(uint256 kind, uint256 which, uint256 id, bytes calldata junk) external {
         Order[4] memory orders = [sales[0], sales[1], ex, bid];
@@ -201,9 +217,9 @@ contract Handler is Test {
         } else if (k == 4) {
             (ok,) = address(pool).call(abi.encodeCall(ICapitalSource.draw, (bound(id, 1, 1 ether))));
         } else if (k == 5) {
-            // Call a policy directly, as if the attacker were the order.
-            (ok,) = address(target.policy()).call(
-                abi.encodeCall(IPolicy.onFill, (attacker, 0, target == ex ? exConfig : bidConfig, junk))
+            // Call a handler directly, as if the attacker were the order.
+            (ok,) = address(target.handler()).call(
+                abi.encodeCall(IOrderHandler.onFill, (attacker, 0, target == ex ? exConfig : bidConfig, junk))
             );
         } else {
             // Spend someone else's approval through an order they approved.
@@ -215,10 +231,10 @@ contract Handler is Test {
 }
 
 contract InvariantTest is Test {
-    Handler h;
+    Driver h;
 
     function setUp() public {
-        h = new Handler();
+        h = new Driver();
         targetContract(address(h));
     }
 
@@ -227,6 +243,11 @@ contract InvariantTest is Test {
         assertEq(h.attacker().balance, 100 ether);
         assertEq(h.nft().balanceOf(h.attacker()), 0);
         assertEq(h.give().balanceOf(h.attacker()), 0);
+    }
+
+    /// No owner moved anything out of an active order: only fills can.
+    function invariant_activeOrdersStayCommitted() public view {
+        assertFalse(h.ownerBypassed());
     }
 
     /// Each sale's NFT is where its history says: in the order, with its buyer (who paid at

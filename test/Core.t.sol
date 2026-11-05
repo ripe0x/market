@@ -3,25 +3,26 @@ pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 import {Base} from "./utils/Base.sol";
 import {
-    DrainPolicy,
-    ProbePolicy,
-    ReentrantPolicy,
+    DrainHandler,
+    ProbeHandler,
+    ReentrantHandler,
     Reenterer,
-    RevertPolicy,
-    StashPolicy,
+    RevertHandler,
+    ScriptHandler,
+    StashHandler,
     TestMulti,
     TestToken
 } from "./utils/Mocks.sol";
 
 contract CoreTest is Base {
-    ProbePolicy probe;
+    ProbeHandler probe;
 
     function setUp() public override {
         super.setUp();
-        probe = new ProbePolicy();
+        probe = new ProbeHandler();
     }
 
     // ---- creation and identity ----
@@ -38,7 +39,7 @@ contract CoreTest is Base {
 
         assertEq(address(order), predicted);
         assertEq(order.owner(), seller);
-        assertEq(address(order.policy()), address(probe));
+        assertEq(address(order.handler()), address(probe));
         assertEq(order.configHash(), keccak256(config));
         assertEq(address(order).balance, 1 ether);
         assertFalse(order.closed());
@@ -49,7 +50,7 @@ contract CoreTest is Base {
         bytes32 h = keccak256("a");
         address base = market.orderAddress(seller, probe, h, 0);
         assertTrue(base != market.orderAddress(buyer, probe, h, 0));
-        assertTrue(base != market.orderAddress(seller, IPolicy(address(dutch)), h, 0));
+        assertTrue(base != market.orderAddress(seller, IOrderHandler(address(dutch)), h, 0));
         assertTrue(base != market.orderAddress(seller, probe, keccak256("b"), 0));
         assertTrue(base != market.orderAddress(seller, probe, h, bytes32(uint256(1))));
     }
@@ -65,9 +66,9 @@ contract CoreTest is Base {
         market.create(probe, "x", 0);
     }
 
-    function test_createRejectsPolicyWithoutCode() public {
-        vm.expectRevert(Market.NoPolicyCode.selector);
-        market.create(IPolicy(makeAddr("eoa")), "", 0);
+    function test_createRejectsHandlerWithoutCode() public {
+        vm.expectRevert(Market.NoHandlerCode.selector);
+        market.create(IOrderHandler(makeAddr("eoa")), "", 0);
     }
 
     /// Assets sent to the predicted address before deployment are controlled only by the order
@@ -116,8 +117,8 @@ contract CoreTest is Base {
         order.fill(config, "");
     }
 
-    function test_policyRevertUndoesFill() public {
-        Order order = _create(seller, new RevertPolicy(), "");
+    function test_handlerRevertUndoesFill() public {
+        Order order = _create(seller, new RevertHandler(), "");
         vm.prank(buyer);
         vm.expectRevert("broken");
         order.fill{value: 1 ether}("", "");
@@ -127,30 +128,52 @@ contract CoreTest is Base {
 
     // ---- who can act as the order ----
 
-    function test_ownerExecutesOutsideFill() public {
+    /// While an order is active nobody, its owner included, can make it act outside a fill.
+    function testFuzz_nobodyExecutesActiveOrderOutsideFill(address caller) public {
         Order order = _create(seller, probe, "");
         vm.deal(address(order), 1 ether);
-        vm.prank(seller);
+        vm.prank(caller);
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.execute(caller, 1 ether, "");
+        assertEq(address(order).balance, 1 ether);
+    }
+
+    function test_ownerExecutesOnlyAfterClosing() public {
+        Order order = _create(seller, probe, "");
+        vm.deal(address(order), 1 ether);
+        vm.startPrank(seller);
+        vm.expectRevert(Order.Unauthorized.selector);
         order.execute(seller, 1 ether, "");
+        order.close();
+        order.execute(seller, 1 ether, "");
+        vm.stopPrank();
         assertEq(seller.balance, 1 ether);
     }
 
-    function testFuzz_onlyOwnerExecutesOutsideFill(address caller) public {
+    function testFuzz_onlyOwnerExecutesClosedOrder(address caller) public {
         vm.assume(caller != seller);
         Order order = _create(seller, probe, "");
+        vm.prank(seller);
+        order.close();
         vm.prank(caller);
         vm.expectRevert(Order.Unauthorized.selector);
         order.execute(caller, 0, "");
     }
 
-    function test_policyCannotExecuteOutsideFill() public {
+    function test_handlerCannotExecuteOutsideFill() public {
         Order order = _create(seller, probe, "");
+        vm.prank(address(probe));
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.execute(address(probe), 0, "");
+        // Closing hands authority to the owner, never to the handler.
+        vm.prank(seller);
+        order.close();
         vm.prank(address(probe));
         vm.expectRevert(Order.Unauthorized.selector);
         order.execute(address(probe), 0, "");
     }
 
-    function test_policyExecutesDuringFill() public {
+    function test_handlerExecutesDuringFill() public {
         Order order = _create(seller, probe, "");
         vm.prank(buyer);
         order.fill{value: 1 ether}("", abi.encode(buyer, 1 ether, ""));
@@ -158,7 +181,7 @@ contract CoreTest is Base {
     }
 
     /// The owner cannot act while a fill is running, so it cannot reach in mid-fill and take
-    /// what the policy is about to deliver.
+    /// what the handler is about to deliver.
     function test_ownerCannotExecuteDuringFill() public {
         Reenterer owner = new Reenterer();
         vm.prank(address(owner));
@@ -166,7 +189,7 @@ contract CoreTest is Base {
         owner.arm(address(order), abi.encodeCall(Order.execute, (address(owner), 0, "")));
         vm.deal(address(order), 1 ether);
 
-        // The policy pays the owner, whose receive hook tries to use owner powers.
+        // The handler pays the owner, whose receive hook tries to use owner powers.
         vm.prank(buyer);
         order.fill("", abi.encode(address(owner), 1 ether, ""));
         assertTrue(owner.attempted());
@@ -182,7 +205,7 @@ contract CoreTest is Base {
 
     function test_selfCallCannotEscalate() public {
         Order order = _create(seller, probe, "");
-        // The policy makes the order call its own execute: msg.sender is the order, not the policy.
+        // The handler makes the order call its own execute: msg.sender is the order, not the handler.
         bytes memory inner = abi.encodeCall(Order.execute, (buyer, 0, ""));
         vm.expectRevert(Order.Unauthorized.selector);
         order.fill("", abi.encode(address(order), 0, inner));
@@ -190,9 +213,11 @@ contract CoreTest is Base {
 
     function test_executeBubblesRevertReason() public {
         Order order = _create(seller, probe, "");
-        vm.prank(seller);
+        vm.startPrank(seller);
+        order.close();
         vm.expectRevert(abi.encodeWithSignature("ERC721NonexistentToken(uint256)", 9));
         order.execute(address(nft), 0, abi.encodeCall(IERC721.ownerOf, (9)));
+        vm.stopPrank();
     }
 
     // ---- closing ----
@@ -222,16 +247,84 @@ contract CoreTest is Base {
         order.close();
     }
 
-    // ---- reentrancy and hostile policies ----
+    /// During a fill only the handler, through the order, may close: the owner cannot close an
+    /// order under a running fill, for example from a payment's receive hook.
+    function test_ownerCannotCloseDuringFill() public {
+        Reenterer owner = new Reenterer();
+        vm.prank(address(owner));
+        Order order = market.create(probe, "", 0);
+        owner.arm(address(order), abi.encodeCall(Order.close, ()));
+        vm.deal(address(order), 1 ether);
+        vm.prank(buyer);
+        order.fill("", abi.encode(address(owner), 1 ether, ""));
+        assertTrue(owner.attempted());
+        assertFalse(owner.succeeded());
+        assertFalse(order.closed());
+    }
+
+    /// The handler closes through `execute`, as the order. Calling `close` itself is refused.
+    function test_handlerClosesOnlyThroughTheOrder() public {
+        ScriptHandler script = new ScriptHandler();
+        Order order = _create(seller, script, "");
+        bytes memory close = abi.encodeCall(Order.close, ());
+        bytes memory direct = script.script(false, address(order), 0, close);
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.fill("", direct);
+        order.fill("", script.script(true, address(order), 0, close));
+        assertTrue(order.closed());
+    }
+
+    /// A handler that closes its order mid-fill keeps authority until the fill returns, and the
+    /// owner gains it only then: closing never opens a window for the owner inside a fill.
+    function test_closingInsideFillHandsOverWhenFillEnds() public {
+        ScriptHandler script = new ScriptHandler();
+        Reenterer owner = new Reenterer();
+        vm.prank(address(owner));
+        Order order = market.create(script, "", 0);
+        vm.deal(address(order), 2 ether);
+        owner.arm(address(order), abi.encodeCall(Order.execute, (address(owner), 1 ether, "")));
+
+        ScriptHandler.Step[] memory steps = new ScriptHandler.Step[](2);
+        steps[0] = ScriptHandler.Step(true, address(order), 0, abi.encodeCall(Order.close, ()));
+        steps[1] = ScriptHandler.Step(true, address(owner), 1 ether, ""); // owner's hook tries execute
+        order.fill("", abi.encode(steps));
+        assertTrue(order.closed());
+        assertTrue(owner.attempted());
+        assertFalse(owner.succeeded());
+        assertEq(address(owner).balance, 1 ether);
+
+        // After the fill the handler has nothing and the owner recovers the rest.
+        vm.prank(address(script));
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.execute(address(script), 1 ether, "");
+        owner.call(address(order), 0, abi.encodeCall(Order.execute, (address(owner), 1 ether, "")));
+        assertEq(address(owner).balance, 2 ether);
+    }
+
+    /// The owner of an active order cannot reach its authority by making the order fill
+    /// itself, and a closed order cannot be filled at all, by anyone.
+    function test_ownerCannotFillThroughTheOrder() public {
+        Order order = _create(seller, probe, "");
+        bytes memory selfFill = abi.encodeCall(Order.fill, ("", abi.encode(seller, 0, "")));
+        vm.startPrank(seller);
+        vm.expectRevert(Order.Unauthorized.selector);
+        order.execute(address(order), 0, selfFill);
+        order.close();
+        vm.expectRevert(Order.OrderClosed.selector);
+        order.execute(address(order), 0, selfFill);
+        vm.stopPrank();
+    }
+
+    // ---- reentrancy and hostile handlers ----
 
     function test_fillCannotReenter() public {
-        Order order = _create(seller, new ReentrantPolicy(), "");
+        Order order = _create(seller, new ReentrantHandler(), "");
         vm.expectRevert(Order.Reentrant.selector);
         order.fill("", "");
     }
 
-    function test_policyCannotKeepAuthority() public {
-        StashPolicy stash = new StashPolicy();
+    function test_handlerCannotKeepAuthority() public {
+        StashHandler stash = new StashHandler();
         Order order = _create(seller, stash, "");
         vm.deal(address(order), 1 ether);
         order.fill("", "");
@@ -242,10 +335,10 @@ contract CoreTest is Base {
         assertEq(address(order).balance, 1 ether);
     }
 
-    /// A hostile policy controls only the orders that chose it. It cannot touch an unrelated
+    /// A hostile handler controls only the orders that chose it. It cannot touch an unrelated
     /// order's assets, or use approvals granted to that order.
-    function test_hostilePolicyIsContainedToItsOwnOrders() public {
-        DrainPolicy drain = new DrainPolicy(attacker);
+    function test_hostileHandlerIsContainedToItsOwnOrders() public {
+        DrainHandler drain = new DrainHandler(attacker);
         Order victimOfOwnChoice = _create(buyer, drain, "");
         vm.deal(address(victimOfOwnChoice), 3 ether);
 
@@ -259,7 +352,7 @@ contract CoreTest is Base {
         vm.expectRevert(Order.Unauthorized.selector);
         victimOfOwnChoice.fill("", abi.encode(address(sale), address(nft), 1));
 
-        // Without that, the drain policy takes only its own order's ETH.
+        // Without that, the drain handler takes only its own order's ETH.
         victimOfOwnChoice.fill("", "");
         assertEq(attacker.balance, 103 ether);
         assertEq(address(sale).balance, 5 ether);
@@ -267,7 +360,7 @@ contract CoreTest is Base {
         assertEq(nft.getApproved(2), address(sale));
     }
 
-    /// A policy pulling from an approval must use `caller`. Approving one order does not let
+    /// A handler pulling from an approval must use `caller`. Approving one order does not let
     /// any other order, or anyone filling that order, spend it.
     function test_approvalToOneOrderIsUnusableElsewhere() public {
         TestToken token = new TestToken("T");
@@ -286,11 +379,11 @@ contract CoreTest is Base {
         assertEq(token.balanceOf(seller), 100);
     }
 
-    /// A broken policy cannot trap assets: recovery never calls the policy.
-    function test_ownerRecoversFromBrokenPolicy() public {
+    /// A broken handler cannot trap assets: recovery never calls the handler.
+    function test_ownerRecoversFromBrokenHandler() public {
         TestToken token = new TestToken("T");
         TestMulti multi = new TestMulti();
-        Order order = _create(seller, new RevertPolicy(), "");
+        Order order = _create(seller, new RevertHandler(), "");
         nft.mint(address(this), 1);
         nft.safeTransferFrom(address(this), address(order), 1);
         multi.mint(address(order), 5, 10);

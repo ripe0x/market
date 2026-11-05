@@ -2,14 +2,14 @@
 pragma solidity ^0.8.28;
 
 import {Artwork} from "./Artwork.sol";
-import {PolicyBase} from "./PolicyBase.sol";
+import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title PaintAction
 /// @notice Example 3. Sells one change to an artwork: the buyer picks a color from the
 /// creator's allowed set and pays ETH. The order must be the token's painter, which only the
 /// token's owner can arrange. The fill paints, resigns the painter role and closes the
 /// order, so the authority cannot be used again. Input: the color.
-contract PaintAction is PolicyBase {
+contract PaintAction is HandlerBase {
     struct Config {
         Artwork art;
         uint256 tokenId;

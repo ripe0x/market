@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 import {FillVerifier} from "../periphery/FillVerifier.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {Base} from "./utils/Base.sol";
@@ -34,8 +34,8 @@ contract WalletBatch {
     }
 }
 
-/// A dishonest policy: takes the filler's tokens and delivers nothing.
-contract PullOnlyPolicy is IPolicy {
+/// A dishonest handler: takes the filler's tokens and delivers nothing.
+contract PullOnlyHandler is IOrderHandler {
     function onFill(address caller, uint256, bytes calldata config, bytes calldata) external returns (bytes memory) {
         (address token, uint256 amount) = abi.decode(config, (address, uint256));
         Order(payable(msg.sender)).execute(token, 0, abi.encodeCall(IERC20.transferFrom, (caller, msg.sender, amount)));
@@ -45,7 +45,7 @@ contract PullOnlyPolicy is IPolicy {
 
 /// A plain EOA, delegated with EIP-7702 to an ordinary wallet batch executor, approves an
 /// order, fills it and checks its own receipt with `FillVerifier` in one atomic transaction,
-/// without trusting the order's policy.
+/// without trusting the order's handler.
 contract Eip7702FillerTest is Base {
     TestToken give;
     TestToken take;
@@ -86,16 +86,16 @@ contract Eip7702FillerTest is Base {
         WalletBatch(payable(eoa)).execute(calls);
     }
 
-    function test_dishonestPolicyFailsTheWalletsCheck() public {
+    function test_dishonestHandlerFailsTheWalletsCheck() public {
         bytes memory config = abi.encode(address(take), uint256(10));
-        Order order = _create(attacker, new PullOnlyPolicy(), config);
+        Order order = _create(attacker, new PullOnlyHandler(), config);
         vm.expectRevert(abi.encodeWithSelector(FillVerifier.TooLittle.selector, 0, 10));
         this.run(_buyGive(order, config, ""));
         assertEq(take.balanceOf(eoa), 100);
         assertEq(take.allowance(eoa, address(order)), 0); // the approval was undone too
     }
 
-    function test_honestPolicyPassesTheWalletsCheck() public {
+    function test_honestHandlerPassesTheWalletsCheck() public {
         bytes memory config = abi.encode(
             TokenExchange.Config(IERC20(address(give)), IERC20(address(take)), 1, 1, seller, block.timestamp)
         );
@@ -128,11 +128,11 @@ contract Eip7702FillerTest is Base {
         assertEq(nft.ownerOf(7), seller);
     }
 
-    /// A delegated EOA has code, but code its key can swap at any time: Market refuses it as a policy.
-    function test_delegatedAccountCannotBePolicy() public {
+    /// A delegated EOA has code, but code its key can swap at any time: Market refuses it as a handler.
+    function test_delegatedAccountCannotBeHandler() public {
         this.run(new WalletBatch.Call[](0));
         assertEq(eoa.code, abi.encodePacked(hex"ef0100", address(wallet)));
-        vm.expectRevert(Market.DelegatedPolicy.selector);
-        market.create(IPolicy(eoa), "", 0);
+        vm.expectRevert(Market.DelegatedHandler.selector);
+        market.create(IOrderHandler(eoa), "", 0);
     }
 }

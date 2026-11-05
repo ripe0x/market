@@ -10,8 +10,9 @@ import {ICapitalSource} from "./AcquisitionBid.sol";
 /// and stops accruing at `cap`. `cap` limits what can be drawn at one moment, not in total:
 /// after a draw the allowance accrues again, so lifetime draws are limited only by `rate`,
 /// time and this pool's balance. An order can draw only while it is filling, so the order's
-/// policy can spend the grant and the order's owner cannot. Funds stay here until drawn, and
-/// the owner may withdraw or revoke at any time: a grant is a conditional permission, not escrow.
+/// handler can spend the grant and the order's owner cannot, before or after closing it.
+/// Funds stay here until drawn, and this pool's owner may withdraw or revoke at any time,
+/// independently of the order: a grant is a conditional permission, not escrow.
 contract CapitalPool is ICapitalSource {
     struct Grant {
         uint128 rate;

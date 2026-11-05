@@ -3,13 +3,13 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Market} from "../../src/Market.sol";
-import {IPolicy, Order} from "../../src/Order.sol";
+import {IOrderHandler, Order} from "../../src/Order.sol";
 import {FillVerifier} from "../../periphery/FillVerifier.sol";
 import {Base} from "../utils/Base.sol";
-import {ProbePolicy, TestToken} from "../utils/Mocks.sol";
+import {ProbeHandler, TestToken} from "../utils/Mocks.sol";
 
 /// During its own order's fill, tries to reach into a DIFFERENT order and drain its ETH.
-contract CrossReachPolicy is IPolicy {
+contract CrossReachHandler is IOrderHandler {
     function onFill(address, uint256, bytes calldata, bytes calldata input) external returns (bytes memory) {
         (address victim, address to, uint256 amount) = abi.decode(input, (address, address, uint256));
         return Order(payable(victim)).execute(to, amount, "");
@@ -31,16 +31,16 @@ contract Seq {
     }
 }
 
-/// Independent review proof-of-concepts for commit 03c263f (ERC-1167 clone orders, policy
-/// code-hash pin, EIP-7702 policy rejection, FillVerifier). New file; nothing else is modified.
+/// Independent review proof-of-concepts for commit 03c263f (ERC-1167 clone orders, handler
+/// code-hash pin, EIP-7702 handler rejection, FillVerifier). New file; nothing else is modified.
 contract CloneReviewPoC is Base {
-    ProbePolicy probe;
+    ProbeHandler probe;
     FillVerifier verifier;
     Seq seq;
 
     function setUp() public override {
         super.setUp();
-        probe = new ProbePolicy();
+        probe = new ProbeHandler();
         verifier = new FillVerifier();
         seq = new Seq();
     }
@@ -92,7 +92,7 @@ contract CloneReviewPoC is Base {
 
     // ---------------------------------------------------------------------
     // PROPERTY: a predicted order address commits to the owner (owner is part of the immutable
-    // args), so a front-runner calling create with the same policy/config/salt gets a DIFFERENT
+    // args), so a front-runner calling create with the same handler/config/salt gets a DIFFERENT
     // address and cannot occupy or claim the victim's predicted order.
     // ---------------------------------------------------------------------
     function test_frontRunCannotClaimPredictedAddress() public {
@@ -100,7 +100,7 @@ contract CloneReviewPoC is Base {
         bytes32 salt = bytes32(uint256(0xBEEF));
         address predicted = market.orderAddress(seller, probe, keccak256(config), salt);
 
-        // Attacker front-runs with identical policy/config/salt.
+        // Attacker front-runs with identical handler/config/salt.
         vm.prank(attacker);
         Order attackerOrder = market.create(probe, config, salt);
         assertTrue(address(attackerOrder) != predicted, "attacker lands on a different address");
@@ -114,15 +114,15 @@ contract CloneReviewPoC is Base {
     }
 
     // ---------------------------------------------------------------------
-    // PROPERTY: during A's fill the shared policy can act as A but never as sibling B.
+    // PROPERTY: during A's fill the shared handler can act as A but never as sibling B.
     // ---------------------------------------------------------------------
-    function test_sharedPolicyCannotActOnSibling() public {
-        CrossReachPolicy cross = new CrossReachPolicy();
-        Order a = _create(seller, cross, ""); // both bound to the SAME policy
+    function test_sharedHandlerCannotActOnSibling() public {
+        CrossReachHandler cross = new CrossReachHandler();
+        Order a = _create(seller, cross, ""); // both bound to the SAME handler
         Order b = _create(buyer, cross, "");
         vm.deal(address(b), 5 ether);
 
-        // During A's fill the policy tries to drain B. B is not filling and the policy is not
+        // During A's fill the handler tries to drain B. B is not filling and the handler is not
         // B's owner, so B.execute rejects it and the whole fill reverts.
         bytes memory drainB = abi.encode(address(b), attacker, uint256(5 ether));
         vm.prank(attacker);
@@ -143,33 +143,34 @@ contract CloneReviewPoC is Base {
     function test_implementationCannotMoveForcedEth() public {
         address impl = market.implementation();
         vm.deal(impl, 1 ether);
-        // No caller can drive execute on the implementation: owner()/policy() revert NotAnOrder.
+        // No caller can drive execute on the implementation: it is never filling and can never
+        // be closed (close reads owner(), which reverts NotAnOrder), so execute refuses everyone.
         vm.prank(attacker);
-        vm.expectRevert(Order.NotAnOrder.selector);
+        vm.expectRevert(Order.Unauthorized.selector);
         Order(payable(impl)).execute(attacker, 1 ether, "");
         assertEq(impl.balance, 1 ether, "stuck but unreachable, not stealable");
     }
 
     // ---------------------------------------------------------------------
     // PROPERTY: the size==23 / 0xef0100 heuristic does not over-reject. A genuine 23-byte
-    // contract whose code does NOT start with 0xef is accepted as a policy (EIP-3541 forbids
+    // contract whose code does NOT start with 0xef is accepted as a handler (EIP-3541 forbids
     // real deployed code starting with 0xef, so only 7702 designators are caught).
     // ---------------------------------------------------------------------
-    function test_tinyNon7702PolicyIsAccepted() public {
-        address tiny = makeAddr("tinyPolicy");
+    function test_tinyNon7702HandlerIsAccepted() public {
+        address tiny = makeAddr("tinyHandler");
         // Exactly 23 bytes whose first byte is not 0xef (here 0x00): a plausible minimal
         // contract, the same length as a 7702 designator but without its prefix.
         vm.etch(tiny, new bytes(23));
         assertEq(tiny.code.length, 23);
         vm.prank(seller);
-        Order order = market.create(IPolicy(tiny), "", bytes32(uint256(1)));
-        assertEq(address(order.policy()), tiny, "tiny non-7702 policy accepted");
+        Order order = market.create(IOrderHandler(tiny), "", bytes32(uint256(1)));
+        assertEq(address(order.handler()), tiny, "tiny non-7702 handler accepted");
     }
 
     // ---------------------------------------------------------------------
     // INFO: an EOA that delegates (EIP-7702) to the Order implementation is NOT caught by
     // _requireClone (address(this) is the EOA, not the implementation), but it is harmless: all
-    // immutable args read as zero, so owner()/policy() are address(0), fill reverts WrongConfig,
+    // immutable args read as zero, so owner()/handler() are address(0), fill reverts WrongConfig,
     // and execute reverts Unauthorized. The EOA's funds cannot be taken through the order ABI.
     // ---------------------------------------------------------------------
     function test_eoaDelegatedToImplementationIsBrickedNotDrainable() public {
@@ -180,14 +181,14 @@ contract CloneReviewPoC is Base {
 
         // Reads return zeroed terms rather than reverting NotAnOrder (clone check passes).
         assertEq(Order(payable(eoa)).owner(), address(0));
-        assertEq(address(Order(payable(eoa)).policy()), address(0));
+        assertEq(address(Order(payable(eoa)).handler()), address(0));
 
         // No one can start a fill: configHash() reads as 0, and no config hashes to 0.
         vm.prank(attacker);
         vm.expectRevert(Order.WrongConfig.selector);
         Order(payable(eoa)).fill("", "");
 
-        // No one can execute as the "order": owner()/policy() are address(0).
+        // No one can execute as the "order": owner()/handler() are address(0).
         vm.prank(attacker);
         vm.expectRevert(Order.Unauthorized.selector);
         Order(payable(eoa)).execute(attacker, 3 ether, "");

@@ -11,7 +11,7 @@ import {PaintAction} from "../examples/PaintAction.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 
 /// @notice Deploys Market (which deploys the one Order implementation), the optional
-/// FillVerifier and the example policies through the standard CREATE2 deployer, so every chain
+/// FillVerifier and the example handlers through the standard CREATE2 deployer, so every chain
 /// gets the same addresses and anyone can redeploy them. None of these contracts has an owner
 /// or constructor arguments.
 ///

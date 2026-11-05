@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IPolicy, Order} from "../../src/Order.sol";
-import {PolicyBase} from "../../examples/PolicyBase.sol";
+import {IOrderHandler, Order} from "../../src/Order.sol";
+import {HandlerBase} from "../../examples/HandlerBase.sol";
 import {DutchAuction} from "../../examples/DutchAuction.sol";
 import {CapitalPool} from "../../examples/CapitalPool.sol";
 import {AcquisitionBid, ICapitalSource, IBidStrategy} from "../../examples/AcquisitionBid.sol";
@@ -13,12 +13,12 @@ import {Base} from "../utils/Base.sol";
 import {TestNFT} from "../utils/Mocks.sol";
 
 // ---------------------------------------------------------------------------
-// Helper policies / mocks used only by this review file.
+// Helper handlers / mocks used only by this review file.
 // ---------------------------------------------------------------------------
 
 /// During its own order's fill, tries to reach into a DIFFERENT order (chosen by someone
-/// else, bound to a different policy) and drain it.
-contract CrossOrderAttackPolicy is IPolicy {
+/// else, bound to a different handler) and drain it.
+contract CrossOrderAttackHandler is IOrderHandler {
     function onFill(address, uint256, bytes calldata, bytes calldata input)
         external
         returns (bytes memory)
@@ -29,10 +29,10 @@ contract CrossOrderAttackPolicy is IPolicy {
     }
 }
 
-/// A policy whose owner can flip its behaviour AFTER an order is created and funded, without
+/// A handler whose owner can flip its behaviour AFTER an order is created and funded, without
 /// changing the order's address or its committed config hash. Models an upgradeable / mutable
-/// policy: the config commitment binds config bytes and the policy *address*, never its code.
-contract MutablePolicy is PolicyBase {
+/// handler: the config commitment binds config bytes and the handler *address*, never its code.
+contract MutableHandler is HandlerBase {
     address public immutable boss;
     bool public rugged;
 
@@ -97,12 +97,12 @@ contract ReentrantGrantee {
 
 contract ReviewPoC is Base {
     // -----------------------------------------------------------------------
-    // 1. Cross-policy isolation: an order's policy cannot touch an order that
+    // 1. Cross-handler isolation: an order's handler cannot touch an order that
     //    did not choose it. (Confirms the central isolation property.)
     // -----------------------------------------------------------------------
-    function test_crossPolicyIsolationHolds() public {
-        // Attacker's own order, bound to a hostile policy.
-        CrossOrderAttackPolicy evil = new CrossOrderAttackPolicy();
+    function test_crossHandlerIsolationHolds() public {
+        // Attacker's own order, bound to a hostile handler.
+        CrossOrderAttackHandler evil = new CrossOrderAttackHandler();
         Order attackOrder = _create(attacker, evil, "");
 
         // An unrelated victim: a funded DutchAuction sale owned by `seller`.
@@ -120,13 +120,13 @@ contract ReviewPoC is Base {
     }
 
     // -----------------------------------------------------------------------
-    // 2. A mutable/upgradeable policy can change an order's behaviour AFTER a
+    // 2. A mutable/upgradeable handler can change an order's behaviour AFTER a
     //    counterparty inspects it, with the SAME order address and config hash.
-    //    The config commitment does not pin the policy's code.
+    //    The config commitment does not pin the handler's code.
     // -----------------------------------------------------------------------
-    function test_mutablePolicyChangesTermsAfterCommit() public {
+    function test_mutableHandlerChangesTermsAfterCommit() public {
         address boss = makeAddr("boss");
-        MutablePolicy pol = new MutablePolicy(boss);
+        MutableHandler pol = new MutableHandler(boss);
         nft.mint(seller, 42);
 
         bytes memory config = abi.encode(IERC721(address(nft)), uint256(42), uint256(1 ether), seller);

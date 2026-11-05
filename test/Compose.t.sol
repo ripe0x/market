@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 import {AcquisitionBid} from "../examples/AcquisitionBid.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {Base} from "./utils/Base.sol";
@@ -31,7 +31,7 @@ contract Matcher {
     receive() external payable {}
 }
 
-/// A buyer that does not trust the seller's policy: it fills, then checks it owns the NFT.
+/// A buyer that does not trust the seller's handler: it fills, then checks it owns the NFT.
 contract GuardedBuyer {
     function buy(Order order, bytes calldata config, IERC721 nft, uint256 id) external payable {
         order.fill{value: msg.value}(config, abi.encode(address(this)));
@@ -41,9 +41,9 @@ contract GuardedBuyer {
     receive() external payable {}
 }
 
-/// A genuine Market order whose creator wrote a dishonest policy: it keeps the ETH and
+/// A genuine Market order whose creator wrote a dishonest handler: it keeps the ETH and
 /// reports a successful sale.
-contract ClaimsDeliveryPolicy is IPolicy {
+contract ClaimsDeliveryHandler is IOrderHandler {
     function onFill(address, uint256 value, bytes calldata, bytes calldata) external pure returns (bytes memory) {
         return abi.encode(value);
     }
@@ -76,7 +76,7 @@ contract ComposeTest is Base {
     }
 
     /// A falling sale and a rising bid were written by different people with different
-    /// policies. When they cross, anyone can settle them together; each order enforces its
+    /// handlers. When they cross, anyone can settle them together; each order enforces its
     /// own terms and the matcher enforces its own.
     function test_matchCrossingSaleAndBid() public {
         (Order sale, bytes memory saleConfig) = _listDutch(seller, 1); // 10 -> 1 ETH over 1000s
@@ -120,11 +120,11 @@ contract ComposeTest is Base {
         assertEq(address(bid).balance, 5 ether);
     }
 
-    /// Market does not protect a filler from the policy it chose to trust. An EOA that pays a
-    /// dishonest policy loses its ETH; a filler that states its own receipt condition does not.
-    function test_fillerProtectsItselfAgainstDishonestPolicy() public {
+    /// Market does not protect a filler from the handler it chose to trust. An EOA that pays a
+    /// dishonest handler loses its ETH; a filler that states its own receipt condition does not.
+    function test_fillerProtectsItselfAgainstDishonestHandler() public {
         nft.mint(seller, 1);
-        IPolicy liar = new ClaimsDeliveryPolicy();
+        IOrderHandler liar = new ClaimsDeliveryHandler();
         Order order = _create(seller, liar, "");
         vm.prank(seller);
         nft.transferFrom(seller, address(order), 1);
@@ -142,9 +142,9 @@ contract ComposeTest is Base {
         assertEq(buyer.balance, 99 ether);
     }
 
-    /// A known policy is itself a receipt guarantee: DutchAuction always delivers or reverts,
+    /// A known handler is itself a receipt guarantee: DutchAuction always delivers or reverts,
     /// so the same guarded buyer succeeds against it.
-    function test_guardedBuyerAgainstHonestPolicy() public {
+    function test_guardedBuyerAgainstHonestHandler() public {
         (Order order, bytes memory config) = _listDutch(seller, 1);
         GuardedBuyer guarded = new GuardedBuyer();
         vm.prank(buyer);

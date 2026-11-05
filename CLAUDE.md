@@ -1,20 +1,20 @@
 # Market: project instructions
 
-Market is a permissionless, execution-agnostic Ethereum protocol: one `Order` account per commitment (an ERC-1167 clone of one fixed implementation, terms in its code), bound to a policy whose code is pinned and which steers the order only during fills. Read `README.md`, then `docs/SPEC.md`, `docs/SECURITY.md`, `docs/DECISIONS.md` and `docs/STATUS.md`.
+Market is a permissionless, execution-agnostic Ethereum protocol. Market creates orders. Orders hold authority: each `Order` is an ERC-1167 clone of one fixed implementation with its terms in its code. OrderHandlers (`IOrderHandler`, "handlers") define behavior; one handler can serve many orders, and its code is pinned. Fills execute that behavior. While an order is active only its handler can make it act, and only during a fill; after the owner closes it, only the owner can. Read `README.md`, then `docs/SPEC.md`, `docs/SECURITY.md`, `docs/DECISIONS.md` and `docs/STATUS.md`.
 
 ## Layout
 
-- `src/` is the core: `Market.sol` (factory) and `Order.sol` (account implementation plus `IPolicy`). Its only dependency is OpenZeppelin `Clones`.
+- `src/` is the core: `Market.sol` (factory) and `Order.sol` (account implementation plus `IOrderHandler`). Its only dependency is OpenZeppelin `Clones`.
 - `periphery/` holds optional contracts Market never calls: `FillVerifier.sol`.
-- `examples/` holds application policies and their helper contracts. Examples may use OpenZeppelin.
+- `examples/` holds application handlers and their helper contracts. Examples may use OpenZeppelin.
 - `test/` holds Foundry tests; shared setup in `test/utils/`.
 - `script/` holds `Deploy.s.sol` (dry run by default) and `Demo.s.sol` with `demo.sh` (local anvil).
 
 ## Rules for changes
 
-1. Keep the core small and asset-agnostic. If an application seems to need a core change, first try to express it as a policy or an external contract, and record the outcome in `docs/DECISIONS.md`.
+1. Keep the core small and asset-agnostic. If an application seems to need a core change, first try to express it as a handler or an external contract, and record the outcome in `docs/DECISIONS.md`.
 2. No `delegatecall` beyond the clone's own call into the fixed implementation, and no fees, owner roles, registries, signature validation, initializers or upgrade paths in the core without a recorded decision and owner review. `Order` must never contain `DELEGATECALL` or `SELFDESTRUCT` (`test_implementationCannotBeReplaced`).
-3. Policies follow the rules in the README: act only through `Order(msg.sender).execute`, take only from `caller`, never forward arbitrary calldata from input, key state by `msg.sender`, verify receipt by state.
+3. Handlers follow the rules in the README: act only through `Order(msg.sender).execute`, take only from `caller`, never forward arbitrary calldata from input, key state by `msg.sender`, verify receipt by state, and offer owner maintenance of active orders only as an explicit, narrow fill. Never add an owner bypass of the active-order rule to the core.
 4. Every change to authority, settlement or money handling needs a focused test, including a hostile case. Fix the design rather than the test when a test exposes a problem.
 5. Keep `docs/STATUS.md` accurate: what was run, the result, and what remains unverified. Never call the contracts safe or audited.
 6. No mainnet deployment, funded signing, real-asset transactions or paid services without the owner's explicit approval.

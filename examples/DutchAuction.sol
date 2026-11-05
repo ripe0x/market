@@ -2,14 +2,16 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {PolicyBase} from "./PolicyBase.sol";
+import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title DutchAuction
 /// @notice Example 1. Sells one ERC721 held by the order for ETH. The price falls linearly from
 /// `startPrice` at `startTime` to `endPrice` at `endTime` and stays there. Anyone may buy;
 /// input is the address that receives the NFT. Excess ETH returns to the caller.
+/// The sale moves the NFT out of the order itself, so it completes only while the order holds
+/// it; while the order is active its owner can take the NFT back only by closing it first.
 /// The order closes after the sale.
-contract DutchAuction is PolicyBase {
+contract DutchAuction is HandlerBase {
     struct Config {
         IERC721 nft;
         uint256 tokenId;

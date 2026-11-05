@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Order} from "../src/Order.sol";
 import {AcquisitionBid, ICapitalSource} from "../examples/AcquisitionBid.sol";
 import {CapitalPool} from "../examples/CapitalPool.sol";
-import {PolicyBase} from "../examples/PolicyBase.sol";
+import {HandlerBase} from "../examples/HandlerBase.sol";
 import {Base} from "./utils/Base.sol";
 import {Reenterer, TestNFT} from "./utils/Mocks.sol";
 
@@ -162,13 +162,18 @@ contract AcquisitionBidTest is Base {
         vm.stopPrank();
     }
 
-    /// The pool releases capital only to the order's policy during a fill. The order's owner,
-    /// and contracts pretending to be filling orders, get nothing.
+    /// The pool releases capital only to the order's handler during a fill. The order's owner,
+    /// before or after closing, and contracts pretending to be filling orders, get nothing.
     function test_poolPaysOnlyThroughAFill() public {
         skip(1000);
-        vm.prank(operator);
+        bytes memory draw = abi.encodeCall(ICapitalSource.draw, (1 ether));
+        vm.startPrank(operator);
+        vm.expectRevert(Order.Unauthorized.selector);
+        bid.execute(address(pool), 0, draw);
+        bid.close();
         vm.expectRevert(CapitalPool.NotFilling.selector);
-        bid.execute(address(pool), 0, abi.encodeCall(ICapitalSource.draw, (1 ether)));
+        bid.execute(address(pool), 0, draw);
+        vm.stopPrank();
 
         vm.prank(attacker);
         vm.expectRevert();
@@ -199,7 +204,7 @@ contract AcquisitionBidTest is Base {
         skip(500);
         vm.prank(holder);
         nft.approve(address(bid), 1);
-        // The policy takes delivery only from the caller.
+        // The handler takes delivery only from the caller.
         vm.prank(attacker);
         vm.expectRevert();
         bid.fill(config, abi.encode(1, 1 ether));
@@ -235,7 +240,7 @@ contract AcquisitionBidTest is Base {
     function test_rejectsEth() public {
         vm.prank(holder);
         vm.deal(holder, 1);
-        vm.expectRevert(PolicyBase.UnexpectedETH.selector);
+        vm.expectRevert(HandlerBase.UnexpectedETH.selector);
         bid.fill{value: 1}(config, abi.encode(1, 0));
     }
 
@@ -257,7 +262,19 @@ contract AcquisitionBidTest is Base {
         assertEq(count, 1);
     }
 
-    /// The operator controls the order's own ETH and can stop the bid, but never the pool.
+    /// While the bid is active its ETH is committed to it: the operator cannot withdraw any.
+    /// The bid keeps working, and the funds stay available to sellers.
+    function test_ownerCannotWithdrawCapitalWhileActive() public {
+        vm.prank(operator);
+        vm.expectRevert(Order.Unauthorized.selector);
+        bid.execute(operator, 0.5 ether, "");
+        assertEq(address(bid).balance, 0.5 ether);
+        skip(1000);
+        _sellInto(holder, bid, config, 1, 2 ether);
+        assertEq(nft.ownerOf(1), vault);
+    }
+
+    /// The operator controls the order's own ETH once it stops the bid, but never the pool.
     function test_operatorStopsBidAndRecoversOrderFunds() public {
         vm.startPrank(operator);
         bid.close();
@@ -306,29 +323,28 @@ contract AcquisitionBidTest is Base {
         assertEq(_current(), 1.5 ether);
     }
 
-    /// The operator can make the bid order fill itself, but the policy's rules still apply: the
-    /// pool pays only the strategy's price, and only for a token actually delivered to the vault.
-    function test_operatorSelfFillFollowsPolicyRules() public {
+    /// The operator cannot make the active bid fill itself, and filling it like anyone else
+    /// gives no exemption from the handler's rules: the strategy's price, paid only for a token
+    /// actually delivered to the vault.
+    function test_operatorFillFollowsHandlerRules() public {
         skip(1000); // bid 2 ETH: quote 2.0, capital 0.5 + 2.0
         vm.prank(holder);
         nft.transferFrom(holder, operator, 1);
-        vm.prank(operator);
-        nft.transferFrom(operator, address(bid), 1);
-
-        bytes memory selfFill = abi.encodeCall(Order.fill, (config, abi.encode(1, 2.1 ether)));
-        vm.prank(operator);
-        vm.expectRevert(abi.encodeWithSelector(AcquisitionBid.AboveBid.selector, 2.1 ether, 2 ether));
-        bid.execute(address(bid), 0, selfFill);
-
-        vm.prank(operator);
+        vm.startPrank(operator);
+        nft.approve(address(bid), 1);
+        vm.expectRevert(Order.Unauthorized.selector);
         bid.execute(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(1, 2 ether))));
+        vm.expectRevert(abi.encodeWithSelector(AcquisitionBid.AboveBid.selector, 2.1 ether, 2 ether));
+        bid.fill(config, abi.encode(1, 2.1 ether));
+        bid.fill(config, abi.encode(1, 2 ether));
+        vm.stopPrank();
         assertEq(nft.ownerOf(1), vault);
-        assertEq(address(bid).balance, 2 ether); // paid to the caller, here the order itself
+        assertEq(operator.balance, 2.5 ether);
         assertEq(address(pool).balance, 8.5 ether);
     }
 
     /// Example 4b: another application swaps in different pricing and funding without any
-    /// change to Market or to the bid policy. It always bids 25% of whatever capital the order
+    /// change to Market or to the bid handler. It always bids 25% of whatever capital the order
     /// holds, and is replenished only by deposits to the order.
     function test_substituteStrategyAndFunding() public {
         bytes memory cfg = _bidConfig(vault, 100 ether, share, abi.encode(uint256(2500)), address(0));

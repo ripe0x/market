@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IPolicy, Order} from "../src/Order.sol";
+import {IOrderHandler, Order} from "../src/Order.sol";
 
-/// @notice Helpers shared by the example policies. Every effect goes through the order that
-/// called the policy, so other contracts see that order, never the policy, as the actor.
-abstract contract PolicyBase is IPolicy {
+/// @notice Helpers shared by the example handlers. Every effect goes through the order that
+/// called the handler, so other contracts see that order, never the handler, as the actor.
+abstract contract HandlerBase is IOrderHandler {
     /// @notice A share of a payment. Shares are basis points and must total 10,000.
     struct Payee {
         address to;

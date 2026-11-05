@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../../src/Market.sol";
-import {IPolicy, Order} from "../../src/Order.sol";
-import {PolicyBase} from "../../examples/PolicyBase.sol";
+import {IOrderHandler, Order} from "../../src/Order.sol";
+import {HandlerBase} from "../../examples/HandlerBase.sol";
 import {DutchAuction} from "../../examples/DutchAuction.sol";
 import {TokenExchange} from "../../examples/TokenExchange.sol";
 import {PaintAction} from "../../examples/PaintAction.sol";
@@ -44,20 +44,20 @@ abstract contract Base is Test {
         vm.deal(attacker, 100 ether);
     }
 
-    function _create(address owner, IPolicy policy, bytes memory config) internal returns (Order order) {
+    function _create(address owner, IOrderHandler handler, bytes memory config) internal returns (Order order) {
         vm.prank(owner);
-        order = market.create(policy, config, bytes32(++salt));
+        order = market.create(handler, config, bytes32(++salt));
     }
 
-    function _payees(address to) internal pure returns (PolicyBase.Payee[] memory p) {
-        p = new PolicyBase.Payee[](1);
-        p[0] = PolicyBase.Payee(to, 10_000);
+    function _payees(address to) internal pure returns (HandlerBase.Payee[] memory p) {
+        p = new HandlerBase.Payee[](1);
+        p[0] = HandlerBase.Payee(to, 10_000);
     }
 
-    function _payees(address a, uint16 aBps, address b) internal pure returns (PolicyBase.Payee[] memory p) {
-        p = new PolicyBase.Payee[](2);
-        p[0] = PolicyBase.Payee(a, aBps);
-        p[1] = PolicyBase.Payee(b, 10_000 - aBps);
+    function _payees(address a, uint16 aBps, address b) internal pure returns (HandlerBase.Payee[] memory p) {
+        p = new HandlerBase.Payee[](2);
+        p[0] = HandlerBase.Payee(a, aBps);
+        p[1] = HandlerBase.Payee(b, 10_000 - aBps);
     }
 
     /// A sale of `id` from 10 ETH down to 1 ETH over 1,000 seconds starting now, paid to `owner`.

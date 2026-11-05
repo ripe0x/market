@@ -3,14 +3,16 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {PolicyBase} from "./PolicyBase.sol";
+import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title TokenExchange
 /// @notice Example 2. The order holds `give` tokens and releases them at a fixed rate for
 /// `take` tokens paid to `payee`. Fills may be partial and repeat until the order runs out,
-/// expires or is closed; the owner can top it up. Input: `(amount of give, recipient)`.
-/// The filler approves this order (not the policy) for the `take` owed.
-contract TokenExchange is PolicyBase {
+/// expires or is closed. Anyone may top it up while it is active; unsold inventory comes back
+/// to the owner only after closing, since this handler offers no maintenance fill.
+/// Input: `(amount of give, recipient)`.
+/// The filler approves this order (not the handler) for the `take` owed.
+contract TokenExchange is HandlerBase {
     struct Config {
         IERC20 give;
         IERC20 take;
