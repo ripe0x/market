@@ -27,7 +27,7 @@
 
 | Property | Mechanism | Tests |
 | --- | --- | --- |
-| One party at a time can make an order act | `execute` checks `filling ? policy : owner` | Core suite; `invariant_attackerGainsNothing` (1,000+ attack attempts per run, none succeed) |
+| One party at a time can make an order act | `execute` checks `filling ? policy : owner` | Core suite; `invariant_attackerGainsNothing` (about 1,000 attack attempts per campaign, none succeed) |
 | Authority granted to one order is unusable by any other | Separate account per order; policies act through `msg.sender` | `test_hostilePolicyIsContainedToItsOwnOrders`, `test_approvalToOneOrderIsUnusableElsewhere`, `test_offersForDifferentTokensAreIsolated` |
 | Terms cannot change | Policy and config hash immutable and part of the CREATE2 address | `test_addressCommitsToEveryField`, `test_buyerCannotRewriteTerms`, `test_sameCommitmentCannotBeCreatedTwice` |
 | Atomic settlement | A fill is one call; any revert undoes it | `test_policyRevertUndoesFill`, `test_insufficientInventoryRollsBackPayment`, `test_falseReturningTokenRejected`, `test_fundingWithdrawnBeforeFillReverts`, `test_matchCrossingSaleAndBid` |

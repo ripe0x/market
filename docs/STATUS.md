@@ -22,7 +22,36 @@ Exploratory implementation, complete for the first milestone: the core, four exa
 
 ## Evidence
 
-RESULTS_PENDING
+Candidate: code at commit `c8bad35` (later commits change only docs and the gas snapshot). Toolchain: forge 1.8.1 (`982849d`), solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run 2026-11-04.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Full suite | `CANDIDATE_RUN=1 forge test` | Exit 0. 100 passed, 0 failed, 11 suites. Fuzz tests 1,000 runs each. |
+| Invariants | (in the full suite) `test/Invariant.t.sol` | 4 invariants, 128 runs x 64 calls = 8,192 calls, 0 reverts; 993 attacker attempts, none succeeded. |
+| Gas | `forge test --match-path test/Gas.t.sol --isolate` | `snapshots/GasTest.json`, table below. |
+| Coverage | `CANDIDATE_RUN=1 forge coverage --ir-minimum --report summary --no-match-coverage 'test\|script'` | `src/` and `examples/`: 97.7% lines (172/176), 95.6% statements, 81.1% branches, 97.3% functions. `--ir-minimum` coverage is approximate. |
+| Sizes | `forge build --sizes` | `Order` 2,085 bytes runtime, `Market` 3,116; largest example `Artwork` 3,813. |
+| Local demo | `script/demo.sh` | All four examples executed on a throwaway anvil node (chain 31337): "ONCHAIN EXECUTION COMPLETE & SUCCESSFUL". |
+| Deploy dry run | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` | Simulation only, nothing broadcast. Estimated 4,124,384 gas for Market plus six example contracts at base fee 0.115 gwei. Market's CREATE2 address would be `0xBd8Ed979dd8E733CD9B2f7a43ce04697ea6B4670`. |
+| Independent review | AI agent on `a50ff04`; repair re-review on `c8bad35` | No critical, high or medium findings. F2, F3, F4 fixed; F1 documented. See SECURITY.md. |
+
+Tests per suite: Core 27, DutchAuction 13, TokenExchange 13, PaintAction 10, AcquisitionBid 18, Compose 4, NewOrderType 1, Eip7702Filler 2, Gas 6, Invariant 1 (4 invariants), review PoC 5.
+
+### Gas
+
+Whole-transaction gas from isolated runs, including the 21,000 base cost and calldata.
+
+| Operation | Gas |
+| --- | --- |
+| Create an order (any policy) | 482,124 to 485,024 |
+| Fill: DutchAuction, 1 payee, with refund, closes | 117,189 |
+| Fill: DutchAuction, 2 payees | 145,717 |
+| Fill: TokenExchange, first partial / repeat | 110,522 / 76,322 |
+| Fill: PaintAction, paint + resign + close | 106,416 |
+| Fill: AcquisitionBid, own funds / drawing from pool | 128,637 / 105,713 |
+| Owner closes / withdraws an NFT | 44,173 / 59,073 |
+
+Fills that pay an address for the first time include 25,000 gas for creating that account; first writes to a storage slot cost 20,000. At a 0.1 gwei base fee, creating an order costs about 0.00005 ETH.
 
 ## Not verified
 
