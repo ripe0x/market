@@ -1,0 +1,14 @@
+{
+  "close": "44173",
+  "create: AcquisitionBid order, funded": "485024",
+  "create: DutchAuction order": "484121",
+  "create: TokenExchange order": "482124",
+  "execute: owner withdraws NFT": "59073",
+  "fill: AcquisitionBid, draws from pool": "105665",
+  "fill: AcquisitionBid, order funds only": "128603",
+  "fill: DutchAuction, 1 payee, refund": "117189",
+  "fill: DutchAuction, 2 payees, exact": "145717",
+  "fill: PaintAction, paint + resign + close": "106416",
+  "fill: TokenExchange, first partial": "108526",
+  "fill: TokenExchange, repeat partial": "74326"
+}
