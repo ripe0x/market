@@ -12,12 +12,13 @@ This is an experiment and a public good, closer to an artwork in protocol form t
 
 ## The idea in one paragraph
 
-An **order** is a contract account that holds some authority: an NFT, a token balance, ETH, an approval, a role in another contract, or a spending grant from a treasury. Its creator binds it, permanently, to a **policy**: code that decides what the order does when someone **fills** it, and what that someone must give in return. The creator can always take the authority back. Nobody else can make the order act, except by filling it on the policy's terms.
+An **order** is a contract account that holds some authority: an NFT, a token balance, ETH, an approval, a role in another contract, or a spending grant from a treasury. Its creator binds it, permanently, to a **policy**: code that decides what the order does when someone **fills** it, and what that someone must give in return. The creator can always take the authority back. Nobody else can make the order act, except by filling it on the policy's terms. Every order is a minimal proxy (ERC-1167 clone) running one fixed implementation, with its terms written into its own code.
 
 ```mermaid
 flowchart LR
     C[Creator] -- "create(policy, config, salt)" --> M[Market]
-    M -- deploys --> O["Order account<br/>owner, policy, configHash"]
+    M -- "deploys clone (CREATE2)" --> O["Order account<br/>terms in its code: owner, policy,<br/>policy code hash, config hash"]
+    O -. "delegatecall (code only)" .-> I["Order implementation<br/>fixed, never an order"]
     C -- "deposit / approve / delegate / grant" --> O
     F[Filler] -- "fill(config, input) + ETH" --> O
     O -- "onFill(caller, value, config, input)" --> P[Policy]
@@ -42,11 +43,12 @@ The design question behind every choice here: **can an independent developer cre
 
 | Part | What it is | Who writes it |
 | --- | --- | --- |
-| [`Market`](src/Market.sol) | Deploys orders with CREATE2 and emits `Created(order, owner, policy, salt, config)`. Holds nothing and can call nothing. | This repository |
-| [`Order`](src/Order.sol) | One account per commitment. Holds the order's assets and permissions, and enforces who may make it act. | This repository |
+| [`Market`](src/Market.sol) | Deploys orders as ERC-1167 clones of one `Order` implementation with CREATE2 and emits `Created(order, owner, policy, salt, config)`. Holds nothing and can call nothing. | This repository |
+| [`Order`](src/Order.sol) | The code every order runs. Each order is its own account: it holds its own assets and permissions, and enforces who may make it act. | This repository |
 | Policy | Any contract implementing [`IPolicy`](src/Order.sol). Decides what a fill does. | Anyone |
+| [`FillVerifier`](periphery/FillVerifier.sol) (optional) | Lets a filler's wallet or contract check its own receipt in the same transaction as its fill. Market does not use it. | This repository |
 
-The whole core is 139 lines of Solidity including comments, about 80 of them code. It contains no `delegatecall`, no signature checking, no registry, no upgrade path and no privileged address.
+The whole core is 200 lines of Solidity including comments, 116 of them code. It contains no signature checking, no registry, no upgrade path and no privileged address. Its only `delegatecall` is each clone's call into the fixed implementation; nothing can change that implementation.
 
 ### Who can make an order act
 
@@ -66,12 +68,12 @@ The whole core is 139 lines of Solidity including comments, about 80 of them cod
 
 **Execution** means whatever the policy makes the order do during a fill: one call or many, reading state between them, computing amounts, checking what arrived.
 
-**Commitment** means the policy and the hash of its configuration are fixed at deployment and are part of the order's address. The creator can withdraw the authority or close the order at any time, but cannot change the terms under which it acts. A filler who reads an order's `Created` event knows exactly which code will run and with which configuration.
+**Commitment** means the policy, the hash of the policy's code and the hash of the configuration are fixed at deployment and are part of the order's address. The creator can withdraw the authority or close the order at any time, but cannot change the terms under which it acts. A filler who reads an order's `Created` event knows exactly which code will run and with which configuration: every fill checks that the policy's code is still the code committed to. That fixes the policy's code, not everything it does; a policy whose code reads changeable state or calls other contracts behaves as those allow (see "What Market guarantees").
 
-An order's address is
+The terms (owner, policy, policy code hash, config hash) are appended to the clone's code, so they exist from the instant the order does. There is no initializer to call, forget or front-run. An order's address is
 
 ```
-CREATE2(market, salt, keccak256(Order.creationCode ++ abi.encode(owner, policy, keccak256(config))))
+CREATE2(market, salt, keccak256(cloneCreationCode(implementation, owner ++ policy ++ policy.codehash ++ keccak256(config))))
 ```
 
 so assets and approvals can be sent to it before it is deployed, and nothing but that exact commitment can ever be deployed there. `Market.orderAddress` computes it.
@@ -99,10 +101,10 @@ sequenceDiagram
     participant N as NFT
     participant B as Buyer
     S->>M: create(DutchAuction, config, salt)
-    M->>O: deploy(owner = S)
+    M->>O: deploy clone, terms in code (owner = S)
     S->>N: transferFrom(S, O, id)
     B->>O: fill{value}(config, recipient)
-    O->>O: check not closed, not filling, keccak(config) == configHash
+    O->>O: check not closed, not filling, keccak(config) == configHash, policy code unchanged
     O->>P: onFill(B, value, config, input)
     P->>O: execute(N, transferFrom(O, recipient, id))
     P->>O: execute(payee, share) for each payee
@@ -142,22 +144,36 @@ A sale falling from 10 ETH and a bid rising from 2 ETH were written by different
 
 Market enforces:
 
-1. Only the owner (outside fills) or the order's own policy (during its fills) can make an order act. Approvals and roles granted to one order are usable by nothing else.
-2. An order's policy and config cannot change. A fill with any other config reverts.
+1. Only the owner (outside fills) or the order's own policy (during its fills) can make an order act. Approvals and roles granted to one order are usable by nothing else, including other orders bound to the same policy.
+2. An order's policy, the policy's code and the config cannot change. A fill with any other config, or after the policy's code was replaced, reverts. An EIP-7702 account, whose code its key can swap, cannot be a policy.
 3. A fill is one call frame. If any part reverts, the whole fill reverts.
 4. An order cannot be filled again while it is being filled.
 5. `close` stops fills permanently, and the owner keeps `execute` for recovery. Recovery never calls the policy, so a broken policy cannot trap assets.
-6. The factory holds nothing and has no functions besides `create` and `orderAddress`.
+6. The factory holds nothing and has no functions besides `create` and `orderAddress`. The implementation every order runs is fixed, and is never an order itself.
 
 Market does **not**, and cannot:
 
 1. Know what a policy does. A policy is code the creator trusts with the order's authority during fills.
-2. Protect a filler from the policy it chose to fill. A filler that does not trust a policy should fill from a contract (a smart account, an EIP-7702 delegated EOA, a matcher, or another order) that checks what it received and reverts otherwise. `test_fillerProtectsItselfAgainstDishonestPolicy` shows both cases, and [test/Eip7702Filler.t.sol](test/Eip7702Filler.t.sol) shows a delegated EOA approving, filling and checking its own receipt in one transaction.
-3. Make a mutable policy safe. A policy behind a proxy, or with an owner who can change its behaviour, gives that owner control of every order bound to it during fills, and anyone can start a fill. Market cannot detect this.
-4. Guarantee liquidity that lives elsewhere. An order funded by an external grant can quote a price that disappears before a fill lands.
-5. Vouch for third-party contracts: NFT collections, tokens and artworks are trusted for their own behaviour.
+2. Protect a filler from the policy it chose to fill. A filler that does not trust a policy should fill from a contract or a batching wallet that checks what it received and reverts otherwise; see "Checking your own receipt" below.
+3. Make a mutable policy safe. A policy behind a proxy, one that `delegatecall`s other code, or one with an owner who can change its behaviour, gives that controller every order bound to it during fills, and anyone can start a fill. The code-hash check does not catch this, because the code stays the same. Read the policy.
+4. Revoke what an order holds elsewhere. Closing stops fills; it does not withdraw approvals, roles or grants the order holds in other contracts, and it cannot stop those contracts' other permission holders. An artist who sells one repaint through Market may still repaint under their own artwork's rules. Consuming a single use permission is the policy's job (Example 3 resigns its role), or the external contract's.
+5. Guarantee liquidity that lives elsewhere. An order funded by an external grant can quote a price that disappears before a fill lands.
+6. Vouch for third-party contracts: NFT collections, tokens and artworks are trusted for their own behaviour.
 
 Details, the full threat model and the test for each property are in [docs/SECURITY.md](docs/SECURITY.md).
+
+## Checking your own receipt
+
+A filler protects itself by making its fill conditional on what it receives, in the same transaction. A contract filler writes the check after its `fill` ([test/Compose.t.sol](test/Compose.t.sol), `GuardedBuyer` and `Matcher`). A wallet that can batch calls atomically (an EIP-7702 or other smart wallet, an EIP-5792 batch) can use the optional [`FillVerifier`](periphery/FillVerifier.sol) instead of writing code:
+
+```
+1. verifier.snapshot(token, balanceOf(me))
+2. token.approve(order, payment)              // or send ETH with the fill
+3. order.fill(config, input)                  // sent by the wallet itself, as usual
+4. verifier.requireIncrease(token, balanceOf(me), amount)
+```
+
+If step 4 reverts, the whole batch reverts, payment and approval included. For a specific NFT, use `requireEqual(nft, ownerOf(id), abi.encode(me))` rather than a balance, which any token would satisfy. To check ETH received, query the verifier itself: `snapshot(verifier, ethBalance(me))`. The verifier holds nothing, needs no approvals, reads only with `staticcall`, and keeps snapshots per caller for one transaction. Each snapshot serves one check: for two fills in one batch, snapshot again before the second. It compares the numbers it is asked to compare; ask the asset's own contract, never the order or its policy. [test/Eip7702Filler.t.sol](test/Eip7702Filler.t.sol) runs this from a delegated EOA against an honest and a dishonest policy. A plain EOA that cannot batch cannot do this, and should fill only policies it has read.
 
 ## Persistent orders
 
@@ -169,7 +185,7 @@ State that evolves with use can live in three places:
 2. In the policy, keyed by the order's address: Example 4 records each clearing price, time and count. Only an order can write its own key, because the key is `msg.sender`.
 3. In external contracts the order interacts with: Example 4's pool tracks how much of the grant has accrued.
 
-Example 4's bid rises with time, is capped by its capital, records what it actually paid, restarts at half that price (never below its start price), and keeps going as capital arrives in the order or the pool. Swapping in a different strategy contract and funding route gives a completely different bidder through the same policy (`test_substituteStrategyAndFunding`).
+Example 4's bid rises with time, is capped by its capital, records what it actually paid (it refuses sales at price zero, which would be gifts rather than prices), restarts at half that price (never below its start price), and keeps going as capital arrives in the order or the pool. Swapping in a different strategy contract and funding route gives a completely different bidder through the same policy (`test_substituteStrategyAndFunding`).
 
 ## The four examples
 
@@ -219,12 +235,12 @@ These are the habits the examples follow. Breaking one usually means a filler or
 5. **Key state by `msg.sender`.** Then only an order can change its own state.
 6. **Verify receipt by state:** balance deltas, `ownerOf` before and after. Return values and success flags are claims.
 7. **End single use orders explicitly:** consume or return the authority, and close the order.
-8. **Keep the policy immutable.** No owner, no proxy, no switches. Every order bound to the policy trusts it.
+8. **Keep the policy immutable.** No owner, no proxy, no `delegatecall`, no switches. Every order bound to the policy trusts it. Market pins the policy's code, so an immutable policy stays exactly what its readers saw.
 9. **Expose a view for quoting,** so fillers can see the current terms without simulating.
 
 ## Usage
 
-Requires [Foundry](https://getfoundry.sh). Dependencies are pinned git submodules (forge-std v1.17.0, OpenZeppelin Contracts v5.7.0, used only by the examples and tests).
+Requires [Foundry](https://getfoundry.sh). Dependencies are pinned git submodules: forge-std v1.17.0, and OpenZeppelin Contracts v5.7.0, used by the core only for `Clones` and otherwise by the examples and tests.
 
 ```bash
 git submodule update --init --recursive
@@ -246,11 +262,11 @@ forge test --match-path test/Gas.t.sol --isolate
 script/demo.sh
 ```
 
-`script/demo.sh` starts a throwaway anvil node, runs all four examples against one Market from anvil's unlocked default accounts, and stops the node. `script/Deploy.s.sol` deploys Market and the example policies through the standard CREATE2 deployer so every chain gets the same addresses; without `--broadcast` it only simulates. See [docs/STATUS.md](docs/STATUS.md) for the exact commands, results and gas.
+`script/demo.sh` starts a throwaway anvil node, runs all four examples against one Market from anvil's unlocked default accounts, and stops the node. `script/Deploy.s.sol` deploys Market (which deploys the `Order` implementation), `FillVerifier` and the example policies through the standard CREATE2 deployer so every chain gets the same addresses; without `--broadcast` it only simulates. See [docs/STATUS.md](docs/STATUS.md) for the exact commands, results and gas.
 
 ## Tradeoffs
 
-1. **Deployment gas.** Every order is a full contract: about 484,000 gas to create, against zero for a signed Seaport order. At 0.06 gwei that is about 0.00003 ETH; at 5 gwei, about 0.0024 ETH. A minimal-proxy design would cost roughly a quarter of that but adds an implementation contract and `delegatecall`. This repository chose clarity; see D004 in [docs/DECISIONS.md](docs/DECISIONS.md).
+1. **Deployment gas.** Every order is its own account: about 94,000 to 97,000 gas to create as a clone, against zero for a signed Seaport order. At 0.1 gwei that is about 0.00001 ETH; at 5 gwei, about 0.0005 ETH. The price of the clone is about 4,100 to 5,200 more gas per fill than a full contract (which cost about 484,000 to create), for the `delegatecall` into the shared implementation. Measurements in D004, [docs/DECISIONS.md](docs/DECISIONS.md).
 2. **Escrow compatibility.** Assets an order holds are not in the owner's wallet. Other marketplaces will not show them as the owner's, and an order cannot sign (it has no EIP-1271 support), so it cannot list itself elsewhere. The owner can take assets back at any time.
 3. **Delegation risk.** An approval to an order is usable by its policy during any fill and by its owner at any time. Prefer approving one token or an exact amount. `setApprovalForAll` to an order exposes the whole collection to that order's policy.
 4. **Externally funded availability.** A bid backed by a grant is only as good as the grant at the moment of the fill. Quotes from `currentBid` can vanish.
@@ -265,7 +281,8 @@ There is no fee to switch on, no administrator to persuade, no registry to join 
 ## Repository
 
 ```
-src/        Market.sol, Order.sol (with IPolicy)
+src/        Market.sol, Order.sol (with IPolicy): the core
+periphery/  FillVerifier.sol: optional receipt checks for fillers
 examples/   the four example applications and their helpers
 test/       Foundry unit, fuzz, invariant, composition and gas tests
 script/     Deploy.s.sol (dry run), Demo.s.sol + demo.sh (local anvil)
@@ -276,4 +293,4 @@ Earlier work on an NFT-only marketplace is preserved on the `claude/market-nft-i
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
