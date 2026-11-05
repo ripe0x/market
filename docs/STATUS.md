@@ -1,39 +1,39 @@
-# Project status
+# Status
 
-Updated: 2026-10-30
+Updated 2026-11-04. Branch `feat/execution-protocol-v1`.
 
 ## State
 
-Specification only. This starter package was prepared for `ripe0x/market`, which was an empty GitHub repository at discovery. No contracts, application, keeper or test harness have been implemented in this package. No claims of real integration, audited code or deployed addresses.
+Exploratory implementation, complete for the first milestone: the core, four examples, a fifth minimal order type, tests, local demo and dry-run deployment. **Not audited, not deployed.** No mainnet transaction, funded signing or paid service has been used.
 
-## Verified research, not implementation evidence
+| Area | State |
+| --- | --- |
+| Core (`src/`) | Implemented: `Market`, `Order`, `IPolicy` |
+| Example 1, NFT sale (`DutchAuction`) | Implemented and tested |
+| Example 2, ERC20 exchange (`TokenExchange`) | Implemented and tested |
+| Example 3, artwork action (`PaintAction`, `Artwork`) | Implemented and tested |
+| Example 4, persistent bid (`AcquisitionBid`, strategies, `CapitalPool`) | Implemented and tested |
+| New order type without core change (`BellPolicy`) | Test only |
+| Composition (sale matched into bid) | Test only (`Matcher` in `test/Compose.t.sol`) |
+| Filler-side receipt checks | Test only: guarded contract buyer (`test/Compose.t.sol`), EIP-7702 delegated EOA (`test/Eip7702Filler.t.sol`) |
+| Local demo | `script/demo.sh` runs all four examples on anvil |
+| Deployment | `script/Deploy.s.sol` simulated locally and against mainnet RPC; never broadcast |
+| Frontend, indexer, keeper | Not built (out of scope for this milestone) |
 
-1. Seaport supports time dependent item amounts, and exposes matching and fulfillment methods including criteria based advanced matching. This does not prove our exact settlement is compatible with OpenSea's live offers.
-2. OpenSea publishes collection offer discovery and an endpoint providing signatures and fulfillment data. The endpoint's output must be validated against the real order and onchain state.
-3. Ponytail is an official public coding agent plugin maintained at `DietrichGebert/ponytail`; prefer installing it in Claude Code through its documented commands, or apply its simplicity principles without unnecessary extra scaffolding.
+## Evidence
 
-## Immediate next action
+RESULTS_PENDING
 
-Begin Roadmap Phase 0. Run and record a genuine atomic fill on a pinned mainnet fork, including fee and seller surplus routing. Decide on native Seaport matching versus a minimal authorization wrapper only after observing the result. Implement the remainder autonomously.
+## Not verified
 
-## Unproven assumptions and blockers
+1. No fork tests against real mainnet tokens, NFT collections or artworks. All tests use local contracts, including deliberately hostile ones.
+2. No human audit. One independent AI review (see SECURITY.md).
+3. EIP-7702 fillers are tested only in Foundry's local EVM (`test/Eip7702Filler.t.sol`), not with real wallet software.
+4. Only Solidity 0.8.30 with via-IR has been compiled and tested.
+5. Gas figures are local measurements under Prague rules; real costs depend on calldata size, warm or cold accounts and gas price.
 
-1. Actual OpenSea order compatibility with our desired surplus distribution and seller minimum enforcement.
-2. Current live offers, fulfillment payload access, RPC availability, API keys, zones, royalties and proof requirements.
-3. Gas economics for small NFT sizes and permissionless executor rewards.
-4. Discoverability of our signed orders through existing NFT marketplaces.
+## Next actions
 
-## Launch boundary
-
-No transactions with real assets, mainnet deployment, paid services, marketing/public launch, or remote push without explicit owner authorization. Keep local commits and a reproducible handoff. Specs may evolve with genuine technical evidence.
-
-## Milestone ledger
-
-| Phase | State | Evidence |
-| --- | --- | --- |
-| 0. Seaport integration proof | Not started | None |
-| 1. Settlement | Not started | None |
-| 2. Matcher | Not started | None |
-| 3. User interface | Not started | None |
-| 4. Review and economic test | Not started | None |
-| 5. Deployment readiness | Not started | None |
+1. Owner review of the open decisions in DECISIONS.md (deployment gas, filler protection boundary, mutable policies, no signatures, license).
+2. If the primitive holds up, fork tests with real assets (a mainnet ERC721 and USDC or USDT through `TokenExchange`), then an independent audit before any deployment that holds value.
+3. A minimal read-only page or script that lists orders from `Market.Created` and decodes known policies, if useful for experiments.

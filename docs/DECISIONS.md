@@ -1,34 +1,53 @@
-# Decision log
+# Decisions
 
-Status labels: Baseline means recommended product direction for implementation. Provisional means an engineering choice to validate and improve using evidence. Deferred means intentionally out of scope. Any change must include a date, evidence and consequence. Keep the Owner Review section current while working independently.
+Each entry records the question, the choice, the alternatives considered and why they lost. Status: **Baseline** (implemented and tested), **Open** (owner review recommended). All entries dated 2026-11-04 unless stated. This log replaces the decision log of the earlier NFT selling product, which remains on the `claude/market-nft-implementation-d5c4ea` branch.
 
-| ID | Status | Decision | Reason and alternatives |
+## Starting point
+
+The earlier work was an NFT selling product: a shared escrow contract holding every listed NFT and bid budget, OpenSea Seaport fills through a zone, fixed protocol and executor fees, a small owner role for currencies and zones, a Next.js app and a keeper. It reached fork tests against real OpenSea offers. Lessons carried over: ETH refunds into EIP-7702 accounts can run out of gas (here they simply revert the filler's own fill); fee-on-transfer and false-returning tokens must be detected by balance change; and Foundry's via-IR build can cache `block.timestamp` within a test function, so tests use `skip()`.
+
+Nothing else carried over. The new direction removes marketplace semantics, fees, the owner role and shared custody.
+
+## Core architecture
+
+| ID | Status | Decision | Alternatives and reasons |
 | --- | --- | --- | --- |
-| D001 | Baseline | Independent Ethereum mainnet ERC721 product | Avoid copying CC mechanics or building an ERC20 exchange. |
-| D002 | Baseline | Seller chooses linear declining minimum NET WETH proceeds with optional nonzero floor, expiry and explicit zero floor opt in | Simple user control; clear safety constraint. Alternative gross price hidden fees was rejected. |
-| D003 | Baseline | Noncustodial signed authorization, onchain cancellation and atomic fulfillment | Seller keeps NFT before fill and has enforceable terms. |
-| D004 | Provisional | Test standard Seaport dynamic listings and native match before any custom contract | Native protocol can reduce new attack surface. Must prove surplus routing on a real fork. |
-| D005 | Baseline | Start with OpenSea item and collection bids; trait offers later if straightforward | Existing liquidity without own bid infrastructure; avoid promising universal marketplace support. |
-| D006 | Provisional | 0.50 percent total fee on net available offer proceeds after mandatory external considerations, divided 0.30 percent to executor and 0.20 percent to protocol | Aligns sellers and makes independent execution possible; real gas economics may require change. |
-| D007 | Baseline | Seller receives the entire net of the selected offer after mandatory external considerations and authorized fees | Don't let executor quietly capture surplus. |
-| D008 | Baseline | Keeper run by protocol plus permissionless execution | Product stays usable if our worker stops; executor reward comes from disclosed fees. |
-| D009 | Provisional | One small web app, one worker, minimal durable order store | Avoid premature infra; decide database and hosting after a working prototype. |
-| D010 | Deferred | ERC20 swaps, cross chain, new token, full NFT marketplace and complex auctions | Distract from the validated seller problem and duplicate established systems. |
-| D011 | Baseline | No authority for founder to take NFTs or seller proceeds; prefer a replaceable stateless version over upgradeable custody | Upgradeability should not create an extraction backdoor. |
-| D012 | Baseline | Mainnet fork and actual signed Seaport orders required before claiming integration success | Mocks do not test real zones, signatures and consideration. |
-| D013 | Baseline | Sellers may get a better price than their current minimum, but app cannot promise globally best price or guaranteed sale | Market data is incomplete and execution is competitive. |
-| D014 | Provisional | Default to simple native WETH accounting; only add ETH convenience if easy and safe | Reduces settlement paths and ambiguity about token delivered. |
+| D001 | Baseline | Market is an execution-agnostic protocol. The core knows nothing about NFTs, tokens, prices or fees. | The old NFT product baked asset types, fees and an OpenSea route into one contract; each new trade shape needed core changes. The acceptance test for the new core is that four unrelated examples and a fifth (`BellPolicy`) need none. |
+| D002 | Baseline | One deployed `Order` contract per commitment. It holds the order's assets and permissions. | (a) Shared escrow contract for all orders: rejected, every approval and deposit would be reachable by every order's code paths. (b) One smart account per user holding many orders: rejected, orders inside one account share authority. (c) Signed offchain orders spending through a shared approved contract (Seaport model): rejected for the same reason, and an authority-holding address is what external contracts need to grant permissions to. (d) EIP-1167 clones of one implementation: cheaper (see D004) but adds an implementation contract and `delegatecall`. Chosen: full contract per order, owner's stated preference for isolation over deployment gas. |
+| D003 | Baseline | Authority model: the owner may `execute` outside fills; the policy may `execute` only during a fill of an order bound to it; `close` by the owner or the order itself. | (a) Policy returns a list of calls for the order to run: same authority, but cannot read results between steps (amounts received, minted ids), so less expressive. (b) Policy runs by `delegatecall` in the order: rejected, a policy could rewrite the order's owner or flags. (c) Recovery mediated by the policy: rejected, a broken policy would trap assets. (d) Owner may act during fills: rejected, the owner could reach into a fill (for example take the ETH a refund is about to use); `test_ownerCannotExecuteDuringFill`. |
+| D004 | Open | Accept about 484,000 gas per order deployment (measured, `snapshots/GasTest.json`). | An EIP-1167 clone with storage instead of immutables is estimated at about 130,000 gas (not measured here), plus several thousand gas per fill for cold storage reads and a `delegatecall` hop. Reversible only by a new factory, which would mean two kinds of order. Owner review: is the per-order cost acceptable for the intended experiments? At 0.06 gwei it is about 0.00003 ETH. |
+| D005 | Baseline | The config is committed as `keccak256(config)` in an immutable and passed in full on every fill. The full bytes are in the `Created` event. | Storing config onchain costs 20,000 gas per word. A creation hook letting the policy validate or initialise was rejected as unnecessary: a policy validates its config at fill time and a creator can simulate first. |
+| D006 | Open | Market does not try to enforce policy immutability. | Binding the policy's code hash was considered and rejected: a proxy keeps its code hash when its implementation changes, and since EIP-6780 a contract cannot be destroyed and redeployed with different code in a later transaction. Nothing onchain can tell whether a policy reads mutable state. The README and SECURITY.md say plainly that a mutable policy's controller controls bound orders during fills. Owner review: accept documentation as the control, or add an optional registry-free "immutable policy" convention later. |
+| D007 | Baseline | Orders cannot sign: no EIP-1271, no generic fallback. | EIP-1271 would let an order's authority be exercised outside its fills through signatures that can be replayed or front-run. A fallback that returns `msg.sig` would accidentally satisfy `isValidSignature`. Consequence: an order cannot list itself on Seaport or OpenSea. `test_ordersDoNotValidateSignatures`. |
+| D008 | Baseline | The owner is always `msg.sender` of `create`. No transfer of ownership. | An arbitrary `owner` argument would let anyone publish orders "owned" by someone who never agreed, polluting discovery. Ownerless or transferable control is available by making the owner a contract (one with no functions makes the order irrevocable). |
+| D009 | Open | Receipt verification for the filler is the filler's own code, not a core feature. | A core postcondition mechanism needs either a small expression language (staticcall, compare, before and after snapshots) or a second hook. Contract fillers, EIP-7702 accounts, matchers and other orders can check anything in ordinary code (`test/Compose.t.sol`; `test/Eip7702Filler.t.sol` shows a delegated EOA approving, filling and checking its own receipt atomically). Limitation: a plain EOA without EIP-7702 or a batching wallet cannot atomically verify the result of an unknown policy; it must trust a known policy. Owner review: is this boundary acceptable, or should a tiny periphery checker be added? |
+| D010 | Baseline | No fill counter or nonce in the core. Repeat fills are allowed exactly when the policy's rules allow them. | A counter costs about 20,000 gas on the first fill, and execution identity already exists as transaction plus `Filled` log. There are no signed messages, so there is nothing to replay; a stale fill fails the policy's current checks (price bounds, inventory, expiry) or `close`. |
+| D011 | Baseline | `execute` makes one call, not a batch. | The batch version measured about 500 bytes larger (about 100,000 gas per deployment). Owners recover in several transactions; closing first makes the order inert while they do. |
+| D012 | Baseline | `close` is permanent. | A reversible pause is a policy concern. Permanent closure means a filler or indexer can treat a closed order as finished. |
+| D013 | Baseline | Native ETH needs no wrapper: `fill` is payable, the policy receives `value`, the order has `receive`. | WETH-only settlement was the old product's choice for simplicity; here it would put an asset into the core. |
+| D014 | Baseline | `Order.filling` is public so external contracts can grant authority usable only through the policy. | Without it, any authority granted to an order is also usable by its owner directly. `CapitalPool.draw` requires `filling()`, so the bid's operator cannot drain a funder's grant (`test_poolPaysOnlyThroughAFill`). |
+| D015 | Baseline | Market and the example policies deploy through the standard CREATE2 deployer with a fixed salt; none has an owner or constructor arguments. | Same addresses on every chain; anyone can redeploy identical bytecode. |
+| D016 | Baseline | Toolchain: Solidity 0.8.30, Prague, via-IR, 200 optimizer runs. The core has no dependencies; OpenZeppelin v5.7.0 is used only by examples and tests. | Of the settings measured, via-IR at 200 runs gave the smallest `Order` (2,085 bytes; 2,619 without via-IR), which directly lowers per-order cost. |
 
-## Owner Review
+## Example design
 
-Review these after the engineering agent has selected and implemented the simplest verified approach. The agent should record its final recommendation and alternatives without stopping to request ordinary approval.
+| ID | Status | Decision | Alternatives and reasons |
+| --- | --- | --- | --- |
+| D101 | Baseline | Policies act only through the calling order, take only from `caller`, key state by `msg.sender` and build every call themselves. | These are what keep a shared policy from becoming shared authority. Listed for authors in the README. |
+| D102 | Baseline | `DutchAuction` closes the order after a sale (about 22,000 gas). | Without closing, an NFT sent back to the order address would be for sale again at the end price. |
+| D103 | Baseline | Payments to configured payees are pushed in the fill. A reverting payee blocks fills. | Pull payments need per-payee state in the policy. The creator chooses payees; `test_rejectingPayeeBlocksSale` documents the effect. |
+| D104 | Baseline | `TokenExchange` measures payment as the payee's balance increase. | Trusting `transferFrom`'s return value misses fee-on-transfer tokens and self-payment. |
+| D105 | Baseline | `PaintAction` paints, then resigns the painter role and closes the order. `Artwork` clears the painter on transfer. | Leaving the role with a closed order would still let the order's owner paint through it; resigning means nothing is left to reuse. Clearing on transfer makes offers from a previous owner stale. |
+| D106 | Baseline | `AcquisitionBid` pays exactly the seller's asked price if it is within `min(strategy quote, maxPrice, capital)`, checks the recipient did not hold the token before and does after, then records the clearing price. | Paying the full current bid instead would let front-running reduce a seller's price silently; an explicit price either clears or reverts. The before-check stops self-delivery (`test_selfDeliveryRejected`). |
+| D107 | Baseline | `CapitalPool` grants stream from zero at `rate` up to `cap`, can be revoked, and pay only filling orders. | A grant starting full would allow an immediate burst. The pool is example code, not part of Market. |
+| D108 | Baseline | Bid strategies are separate `view` contracts chosen in config. | Shows an application can substitute pricing without touching Market or the policy (`test_substituteStrategyAndFunding`). |
 
-1. D004: Was native Seaport settlement sufficient? If not, exactly what additional contract was proven necessary?
-2. D006: Is a 0.50 percent fee with a 0.30/0.20 split economically viable at measured gas rates? Should the minimum supported sale amount be limited?
-3. D009: Which hosting and database option was selected and why? Any recurring operating cost?
-4. D014: Is WETH only sufficiently clear for the initial user experience, or does ETH convenience materially simplify it?
-5. Actual audit findings, permissions and unresolved major launch blockers, if any.
+## Owner review
 
-## Instructions for future decisions
-
-Each subsequent decision should state ID, date, question, options, selection, reasons, evidence or test, rollback cost, status and whether owner review is recommended. When a decision changes an existing document, update `FUNCTIONAL_SPEC.md`, `ROADMAP.md` and `STATUS.md` to match. No unapproved live deployments or expenditures.
+1. **D004 per-order deployment gas** (about 484,000). Keep full contracts, or accept clones and `delegatecall` for about a quarter of the cost?
+2. **D009 filler protection.** Market leaves receipt checks to the filler's own code. Plain EOAs without EIP-7702 can only trust known policies.
+3. **D006 mutable policies.** Documented, not enforced.
+4. **D007 no signatures.** Orders cannot list on signature-based marketplaces.
+5. **D008 owner is the creator,** fixed forever; flexible control means a contract owner.
+6. **License.** Source files carry MIT SPDX headers; there is no LICENSE file because the copyright holder is the owner's choice.
+7. **Security review findings and residual risks** in [SECURITY.md](SECURITY.md).

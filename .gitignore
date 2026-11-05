@@ -1,6 +1,6 @@
 out/
 cache/
-broadcast/*/31337/
+broadcast/
 .env
 .env.*
 !.env.example

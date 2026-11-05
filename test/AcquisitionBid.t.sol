@@ -270,6 +270,27 @@ contract AcquisitionBidTest is Base {
         vm.stopPrank();
     }
 
+    /// The operator can make the bid order fill itself, but the policy's rules still apply: the
+    /// pool pays only the strategy's price, and only for a token actually delivered to the vault.
+    function test_operatorSelfFillFollowsPolicyRules() public {
+        skip(1000); // bid 2 ETH: quote 2.0, capital 0.5 + 2.0
+        vm.prank(holder);
+        nft.transferFrom(holder, operator, 1);
+        vm.prank(operator);
+        nft.transferFrom(operator, address(bid), 1);
+
+        bytes memory selfFill = abi.encodeCall(Order.fill, (config, abi.encode(1, 2.1 ether)));
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(AcquisitionBid.AboveBid.selector, 2.1 ether, 2 ether));
+        bid.execute(address(bid), 0, selfFill);
+
+        vm.prank(operator);
+        bid.execute(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(1, 2 ether))));
+        assertEq(nft.ownerOf(1), vault);
+        assertEq(address(bid).balance, 2 ether); // paid to the caller, here the order itself
+        assertEq(address(pool).balance, 8.5 ether);
+    }
+
     /// Example 4b: another application swaps in different pricing and funding without any
     /// change to Market or to the bid policy. It always bids 25% of whatever capital the order
     /// holds, and is replenished only by deposits to the order.
