@@ -3,15 +3,17 @@ pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
 import {Market} from "../src/Market.sol";
+import {FillVerifier} from "../periphery/FillVerifier.sol";
 import {AcquisitionBid} from "../examples/AcquisitionBid.sol";
 import {CapitalShareStrategy, RisingStrategy} from "../examples/BidStrategies.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 
-/// @notice Deploys Market and the example policies through the standard CREATE2 deployer, so
-/// every chain gets the same addresses and anyone can redeploy them. None of these contracts
-/// has an owner or constructor arguments.
+/// @notice Deploys Market (which deploys the one Order implementation), the optional
+/// FillVerifier and the example policies through the standard CREATE2 deployer, so every chain
+/// gets the same addresses and anyone can redeploy them. None of these contracts has an owner
+/// or constructor arguments.
 ///
 /// Dry run (simulation only, nothing is sent):
 ///   forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co
@@ -21,7 +23,10 @@ contract Deploy is Script {
 
     function run() external {
         vm.startBroadcast();
-        _log("Market", address(new Market{salt: SALT}()));
+        Market market = new Market{salt: SALT}();
+        _log("Market", address(market));
+        _log("Order implementation", market.implementation());
+        _log("FillVerifier", address(new FillVerifier{salt: SALT}()));
         _log("DutchAuction", address(new DutchAuction{salt: SALT}()));
         _log("TokenExchange", address(new TokenExchange{salt: SALT}()));
         _log("PaintAction", address(new PaintAction{salt: SALT}()));

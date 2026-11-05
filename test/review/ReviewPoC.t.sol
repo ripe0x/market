@@ -265,16 +265,18 @@ contract ReviewPoC is Base {
         uint256 before = acquisition.currentBid(address(bid), c);
         assertGt(before, 1 ether);
 
-        // Griefer sells a (cheap) collection token for 0.
+        // Griefer tries to sell a (cheap) collection token for 0. Repaired: refused outright,
+        // so nothing is recorded and the climb continues.
         nft.mint(griefer, 1);
         vm.startPrank(griefer);
         nft.approve(address(bid), 1);
+        vm.expectRevert(AcquisitionBid.ZeroPrice.selector);
         bid.fill(config, abi.encode(uint256(1), uint256(0)));
         vm.stopPrank();
 
-        (uint128 lastPrice,,) = acquisition.state(address(bid));
-        assertEq(lastPrice, 0, "clearing price recorded as 0");
-        assertEq(acquisition.currentBid(address(bid), c), 1 ether, "bid restarts at its start price");
-        assertEq(nft.ownerOf(1), vault);
+        (,, uint64 count) = acquisition.state(address(bid));
+        assertEq(count, 0, "nothing recorded");
+        assertEq(acquisition.currentBid(address(bid), c), before, "bid unchanged");
+        assertEq(nft.ownerOf(1), griefer);
     }
 }

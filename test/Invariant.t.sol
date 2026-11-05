@@ -151,6 +151,7 @@ contract Handler is Test {
     function sellToBid(uint256 fraction) external {
         uint256 current = acquisition.currentBid(address(bid), abi.decode(bidConfig, (AcquisitionBid.Config)));
         uint256 price = current * bound(fraction, 0, 10_000) / 10_000;
+        if (price == 0) return; // the bid refuses gifts; see test_zeroPriceSaleRejected
         uint256 id = nextToken++;
         nft.mint(holder, id);
         uint256 before = holder.balance;

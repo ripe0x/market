@@ -5,7 +5,8 @@ import {IBidStrategy} from "./AcquisitionBid.sol";
 
 /// @notice Rises linearly with time. Before the first acquisition it starts at `startPrice` at
 /// `startTime`. After each one it restarts at `resetBps` of the clearing price, but never
-/// below `startPrice`, so a sale at a token price of zero cannot suppress the curve.
+/// below `startPrice`. A cheap sale therefore restarts the climb from `startPrice`: that is
+/// the strategy searching again, and each restart costs whoever causes it a token.
 contract RisingStrategy is IBidStrategy {
     struct Params {
         uint256 startPrice;

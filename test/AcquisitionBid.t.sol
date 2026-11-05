@@ -272,15 +272,35 @@ contract AcquisitionBidTest is Base {
         vm.stopPrank();
     }
 
-    /// A sale at price zero (say, of a worthless token from the collection) records a zero
-    /// clearing price, but the strategy never restarts below its start price.
-    function test_zeroPriceSaleCannotSuppressBid() public {
+    /// A gift at price zero is not a clearing price: it is refused and nothing is recorded.
+    function test_zeroPriceSaleRejected() public {
         vm.deal(address(bid), 10 ether);
         skip(1000);
         assertEq(_current(), 2 ether);
-        _sellInto(holder, bid, config, 1, 0);
-        (uint128 lastPrice,,) = acquisition.state(address(bid));
+        vm.startPrank(holder);
+        nft.approve(address(bid), 1);
+        vm.expectRevert(AcquisitionBid.ZeroPrice.selector);
+        bid.fill(config, abi.encode(1, 0));
+        vm.stopPrank();
+        (uint128 lastPrice, uint64 lastTime, uint64 count) = acquisition.state(address(bid));
         assertEq(lastPrice, 0);
+        assertEq(lastTime, 0);
+        assertEq(count, 0);
+        assertEq(nft.ownerOf(1), holder);
+        skip(500);
+        assertEq(_current(), 2.5 ether); // the climb was not interrupted
+    }
+
+    /// Any paid sale, however cheap, is a clearing price. The rising strategy restarts at its
+    /// start price and climbs again; whoever forces a restart gives the bid a token each time.
+    function test_cheapSaleRestartsAtStartPrice() public {
+        vm.deal(address(bid), 10 ether);
+        skip(1000);
+        _sellInto(holder, bid, config, 1, 1);
+        (uint128 lastPrice,, uint64 count) = acquisition.state(address(bid));
+        assertEq(lastPrice, 1);
+        assertEq(count, 1);
+        assertEq(nft.ownerOf(1), vault);
         assertEq(_current(), 1 ether);
         skip(500);
         assertEq(_current(), 1.5 ether);
@@ -335,6 +355,12 @@ contract AcquisitionBidTest is Base {
         uint256 orderBefore = address(bid).balance;
         vm.startPrank(holder);
         nft.approve(address(bid), 1);
+        if (price == 0) {
+            vm.expectRevert(AcquisitionBid.ZeroPrice.selector);
+            bid.fill(config, abi.encode(1, uint256(0)));
+            vm.stopPrank();
+            return;
+        }
         if (price > current) {
             vm.expectRevert(abi.encodeWithSelector(AcquisitionBid.AboveBid.selector, price, current));
             bid.fill(config, abi.encode(1, uint256(price)));

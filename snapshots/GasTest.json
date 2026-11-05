@@ -1,14 +1,14 @@
 {
-  "close": "44173",
-  "create: AcquisitionBid order, funded": "485024",
-  "create: DutchAuction order": "484121",
-  "create: TokenExchange order": "482124",
-  "execute: owner withdraws NFT": "59073",
-  "fill: AcquisitionBid, draws from pool": "105713",
-  "fill: AcquisitionBid, order funds only": "128637",
-  "fill: DutchAuction, 1 payee, refund": "117189",
-  "fill: DutchAuction, 2 payees, exact": "145717",
-  "fill: PaintAction, paint + resign + close": "106416",
-  "fill: TokenExchange, first partial": "110522",
-  "fill: TokenExchange, repeat partial": "76322"
+  "close": "46994",
+  "create: AcquisitionBid order, funded": "96890",
+  "create: DutchAuction order": "95984",
+  "create: TokenExchange order": "93973",
+  "execute: owner withdraws NFT": "61966",
+  "fill: AcquisitionBid, draws from pool": "110580",
+  "fill: AcquisitionBid, order funds only": "132768",
+  "fill: DutchAuction, 1 payee, refund": "122360",
+  "fill: DutchAuction, 2 payees, exact": "150900",
+  "fill: PaintAction, paint + resign + close": "111578",
+  "fill: TokenExchange, first partial": "114664",
+  "fill: TokenExchange, repeat partial": "80464"
 }

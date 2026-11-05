@@ -30,7 +30,8 @@ interface ICapitalSource {
 /// the lowest of the strategy's quote, the configured `maxPrice` and available capital
 /// (the order's ETH plus whatever `source` will release). A holder approves this order for
 /// the token and fills with `(tokenId, price)`; the holder is paid exactly `price` if it is
-/// within the maximum. Each acquisition records its clearing price for the next quote.
+/// above zero and within the maximum. Each acquisition records its clearing price for the next
+/// quote, so a gift at price zero is refused rather than recorded as a market price.
 /// Capital may arrive at any time, in the order or in the source.
 contract AcquisitionBid is PolicyBase {
     struct Config {
@@ -54,6 +55,7 @@ contract AcquisitionBid is PolicyBase {
     event Acquired(address indexed order, uint256 indexed tokenId, address indexed seller, uint256 price);
 
     error AboveBid(uint256 price, uint256 bid);
+    error ZeroPrice();
     error NotDelivered();
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
@@ -63,6 +65,7 @@ contract AcquisitionBid is PolicyBase {
         if (value != 0) revert UnexpectedETH();
         Config memory c = abi.decode(config, (Config));
         (uint256 tokenId, uint256 price) = abi.decode(input, (uint256, uint256));
+        if (price == 0) revert ZeroPrice();
         uint256 bid = currentBid(msg.sender, c);
         if (price > bid) revert AboveBid(price, bid);
 

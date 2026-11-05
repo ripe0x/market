@@ -20,25 +20,28 @@ interface IPolicy {
 }
 
 /// @title Order
-/// @notice An account holding one authorized execution commitment. Deployed by `Market`.
+/// @notice An account holding one authorized execution commitment. Every order is an ERC-1167
+/// clone of this contract deployed by `Market`, with its own address, balance and storage.
 ///
 /// Authority over this account's assets and permissions belongs to exactly two parties:
 /// - `owner`, at any time except during a fill: recovery, revocation and anything else.
 /// - `policy`, only during a fill, which anyone may start by calling `fill`.
 ///
-/// The policy and the hash of its configuration are fixed at deployment and are part of this
-/// account's address. Nothing in this contract knows what the order trades. There is no
-/// delegatecall, no upgrade path and no other privileged party.
+/// The owner, the policy, the policy's code hash and the hash of its configuration are appended
+/// to the clone's code at deployment, so they are part of the order's address and can never
+/// change. There is no initializer. Nothing in this contract knows what the order trades. The
+/// only `delegatecall` is the clone's own, to this fixed code; there is no upgrade path and no
+/// other privileged party.
 contract Order {
-    address public immutable owner;
-    IPolicy public immutable policy;
-    bytes32 public immutable configHash;
-
     /// @notice Permanently stops fills. The owner keeps `execute` for recovery.
     bool public closed;
     /// @notice True only while `fill` is running. External contracts that grant this order
     /// authority can check it to accept calls made through the policy and refuse the owner.
     bool public transient filling;
+
+    /// @dev Inside a clone `address(this)` is the clone, so this matches only direct calls to
+    /// the implementation, which has no owner, policy or terms and must never act as an order.
+    address private immutable implementation = address(this);
 
     event Filled(address indexed caller, uint256 value);
     event Closed();
@@ -47,11 +50,24 @@ contract Order {
     error OrderClosed();
     error Reentrant();
     error WrongConfig();
+    error PolicyCodeChanged();
+    error NotAnOrder();
 
-    constructor(address owner_, IPolicy policy_, bytes32 configHash_) payable {
-        owner = owner_;
-        policy = policy_;
-        configHash = configHash_;
+    function owner() public view returns (address) {
+        return address(bytes20(_arg(0)));
+    }
+
+    function policy() public view returns (IPolicy) {
+        return IPolicy(address(bytes20(_arg(20))));
+    }
+
+    /// @notice The policy's code hash when this order was created. Fills require it unchanged.
+    function policyCodehash() public view returns (bytes32) {
+        return _arg(40);
+    }
+
+    function configHash() public view returns (bytes32) {
+        return _arg(72);
     }
 
     /// @notice Ask this order to execute. The policy decides what happens and may take
@@ -59,9 +75,13 @@ contract Order {
     function fill(bytes calldata config, bytes calldata input) external payable returns (bytes memory result) {
         if (closed) revert OrderClosed();
         if (filling) revert Reentrant();
-        if (keccak256(config) != configHash) revert WrongConfig();
+        if (keccak256(config) != configHash()) revert WrongConfig();
+        IPolicy p = policy();
+        // Since EIP-6780 deployed code can change only by being destroyed in its creation
+        // transaction and redeployed; this refuses to run code other than what was committed.
+        if (address(p).codehash != policyCodehash()) revert PolicyCodeChanged();
         filling = true;
-        result = policy.onFill(msg.sender, msg.value, config, input);
+        result = p.onFill(msg.sender, msg.value, config, input);
         filling = false;
         emit Filled(msg.sender, msg.value);
     }
@@ -69,7 +89,7 @@ contract Order {
     /// @notice Make one call as this order. During a fill only the policy may call this;
     /// otherwise only the owner. A failing call reverts with its own reason.
     function execute(address target, uint256 value, bytes calldata data) external returns (bytes memory ret) {
-        if (msg.sender != (filling ? address(policy) : owner)) revert Unauthorized();
+        if (msg.sender != (filling ? address(policy()) : owner())) revert Unauthorized();
         bool ok;
         (ok, ret) = target.call{value: value}(data);
         if (!ok) {
@@ -80,28 +100,49 @@ contract Order {
     }
 
     /// @notice Stop all future fills. Callable by the owner, or by this order itself, which
-    /// lets a policy end a single use order from inside its fill.
+    /// lets a policy end a single use order from inside its fill. Permissions this account
+    /// holds in other contracts are not revoked; the owner or the policy must do that.
     function close() external {
-        if (msg.sender != owner && msg.sender != address(this)) revert Unauthorized();
+        if (msg.sender != owner() && msg.sender != address(this)) revert Unauthorized();
         closed = true;
         emit Closed();
     }
 
-    receive() external payable {}
+    receive() external payable {
+        _requireClone();
+    }
 
-    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+    function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
+        _requireClone();
         return this.onERC721Received.selector;
     }
 
-    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external view returns (bytes4) {
+        _requireClone();
         return this.onERC1155Received.selector;
     }
 
     function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
         external
-        pure
+        view
         returns (bytes4)
     {
+        _requireClone();
         return this.onERC1155BatchReceived.selector;
+    }
+
+    function _requireClone() private view {
+        if (address(this) == implementation) revert NotAnOrder();
+    }
+
+    /// @dev 32 bytes of the arguments `Market` appended after the 45 byte ERC-1167 proxy code:
+    /// owner (20 bytes), policy (20), policy code hash (32), config hash (32). In a clone,
+    /// `address()` is the clone, so this reads the clone's own code.
+    function _arg(uint256 offset) private view returns (bytes32 word) {
+        _requireClone();
+        assembly ("memory-safe") {
+            extcodecopy(address(), 0, add(0x2d, offset), 0x20)
+            word := mload(0)
+        }
     }
 }
