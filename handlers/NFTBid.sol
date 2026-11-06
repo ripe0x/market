@@ -12,11 +12,12 @@ import {NFTTrade} from "./NFTTrade.sol";
 /// `Market.create` or to the order at any time; a fill reverts while that is less than the price.
 ///
 /// A holder approves this handler, not the order, for the token (`approve` or
-/// `setApprovalForAll`), and fills with `abi.encode(uint256 tokenId, uint256 minProceeds)`. The
-/// token goes from the holder straight to `recipient`; the holder receives `price - royalty`,
-/// and the fill reverts if that is below `minProceeds`, so a stale quote or a changed royalty
-/// cannot pay less than the holder accepted. The order pays exactly the scheduled price, never
-/// more: that is the bidder's limit.
+/// `setApprovalForAll`), and fills with
+/// `abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`. The token goes from
+/// the holder straight to `recipient`; `proceedsTo` receives `price - royalty`, and the fill
+/// reverts if that is below `minProceeds`, so a stale quote or a changed royalty cannot pay less
+/// than the holder accepted. The order pays exactly the scheduled price, never more: that is
+/// the bidder's limit.
 ///
 /// Why the handler holds the approval: an order's owner can close it at any moment and then
 /// make any call as the order. An approval to a bid's order is therefore an approval to the
@@ -75,7 +76,8 @@ contract NFTBid is NFTTrade {
             || !Order(payable(msg.sender)).filling()) revert NotAFill();
         if (value != 0) revert UnexpectedETH();
         Config memory c = abi.decode(config, (Config));
-        (uint256 tokenId, uint256 minProceeds) = abi.decode(input, (uint256, uint256));
+        (uint256 tokenId, uint256 minProceeds, address proceedsTo) = abi.decode(input, (uint256, uint256, address));
+        if (proceedsTo == address(0)) revert ZeroAddress();
         (uint256 price, address royaltyTo, uint256 royalty) = quote(msg.sender, c, tokenId);
         if (price - royalty < minProceeds) revert BelowMinProceeds(price - royalty, minProceeds);
 
@@ -84,7 +86,7 @@ contract NFTBid is NFTTrade {
         if (n >= c.maxFills) _close();
         _deliver(c.nft, caller, c.recipient, tokenId);
         _sendETH(royaltyTo, royalty);
-        _sendETH(caller, price - royalty);
+        _sendETH(proceedsTo, price - royalty);
         emit Bought(msg.sender, caller, tokenId, price, royalty);
         return abi.encode(price, royalty);
     }

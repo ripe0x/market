@@ -21,7 +21,7 @@ contract FakeOrder {
     }
 
     function attack(bytes calldata config, address victim, uint256 id) external {
-        handler.onFill(victim, 0, config, abi.encode(id, 0));
+        handler.onFill(victim, 0, config, abi.encode(id, 0, msg.sender));
     }
 }
 
@@ -34,7 +34,7 @@ contract Arbitrageur {
         uint256 before = address(this).balance - msg.value;
         sale.fill{value: msg.value}(saleConfig, abi.encode(address(this), msg.value));
         nft.approve(bidHandler, id);
-        bid.fill(bidConfig, abi.encode(id, 0));
+        bid.fill(bidConfig, abi.encode(id, 0, address(this)));
         require(address(this).balance > before, "no profit");
         payable(msg.sender).transfer(address(this).balance);
     }
@@ -81,7 +81,7 @@ contract NFTBidTest is Base {
 
     function _sell(Order order, bytes memory config, uint256 id, uint256 minProceeds) internal returns (bytes memory) {
         vm.prank(holder);
-        return order.fill(config, abi.encode(id, minProceeds));
+        return order.fill(config, abi.encode(id, minProceeds, holder));
     }
 
     function test_singleTokenBid() public {
@@ -170,7 +170,7 @@ contract NFTBidTest is Base {
         vm.deal(holder, 1 ether);
         vm.prank(holder);
         vm.expectRevert(HandlerBase.UnexpectedETH.selector);
-        order.fill{value: 1}(config, abi.encode(1, 0));
+        order.fill{value: 1}(config, abi.encode(1, 0, holder));
     }
 
     function test_onlyTheFillerCanBeTakenFrom() public {
@@ -180,7 +180,7 @@ contract NFTBidTest is Base {
         // not own it.
         vm.prank(attacker);
         vm.expectRevert();
-        order.fill(config, abi.encode(1, 0));
+        order.fill(config, abi.encode(1, 0, holder));
         assertEq(art.ownerOf(1), holder);
     }
 
@@ -196,7 +196,7 @@ contract NFTBidTest is Base {
         vm.expectRevert(); // the holder approved the handler, not the order
         order.execute(address(art), 0, abi.encodeCall(IERC721.transferFrom, (holder, bidder, 1)));
         vm.expectRevert(NFTBid.NotAFill.selector); // a genuine order, but not filling
-        order.execute(address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (holder, 0, config, abi.encode(1, 0))));
+        order.execute(address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (holder, 0, config, abi.encode(1, 0, holder))));
         vm.stopPrank();
 
         // Pretending to be an order.
@@ -205,7 +205,7 @@ contract NFTBidTest is Base {
         fake.attack(config, holder, 1);
         vm.prank(attacker);
         vm.expectRevert(NFTBid.NotAFill.selector);
-        bids.onFill(holder, 0, config, abi.encode(1, 0));
+        bids.onFill(holder, 0, config, abi.encode(1, 0, holder));
 
         assertEq(art.ownerOf(1), holder);
     }
@@ -233,7 +233,7 @@ contract NFTBidTest is Base {
         bytes memory bidConfig = _config(true, 0, _fixed(0), 1);
         Order hostile = _create(attacker, script, "");
         bytes memory steps = script.script(
-            true, address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (holder, 0, bidConfig, abi.encode(1, 0)))
+            true, address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (holder, 0, bidConfig, abi.encode(1, 0, holder)))
         );
         vm.prank(attacker);
         vm.expectRevert(NFTBid.NotAFill.selector);
@@ -250,7 +250,7 @@ contract NFTBidTest is Base {
         vm.deal(address(order), 1 ether);
         vm.prank(attacker);
         vm.expectRevert(); // the attacker owns no token
-        order.fill(config, abi.encode(1, 0));
+        order.fill(config, abi.encode(1, 0, holder));
         _sell(order, config, 1, 0);
         assertEq(art.ownerOf(1), vault);
     }
@@ -260,7 +260,7 @@ contract NFTBidTest is Base {
         art.setRoyalty(address(r), 500);
         bytes memory config = _config(true, 0, _fixed(1 ether), 5);
         Order order = _bid(config, 5 ether);
-        r.arm(address(order), abi.encodeCall(Order.fill, (config, abi.encode(2, 0))));
+        r.arm(address(order), abi.encodeCall(Order.fill, (config, abi.encode(2, 0, holder))));
         _sell(order, config, 1, 0);
         assertTrue(r.attempted());
         assertFalse(r.succeeded(), "same order cannot be reentered");
@@ -274,7 +274,7 @@ contract NFTBidTest is Base {
         Order order = _bid(config, 1 ether);
         vm.prank(holder);
         vm.expectRevert(NFTTrade.NotDelivered.selector);
-        order.fill(config, abi.encode(1, 0));
+        order.fill(config, abi.encode(1, 0, holder));
     }
 
     function test_recipientAlreadyOwningIsRejected() public {
@@ -284,7 +284,7 @@ contract NFTBidTest is Base {
         Order order = _bid(config, 1 ether);
         vm.prank(vault);
         vm.expectRevert(NFTTrade.NotDelivered.selector);
-        order.fill(config, abi.encode(1, 0));
+        order.fill(config, abi.encode(1, 0, holder));
     }
 
     /// Two strangers' orders on the two handlers settle in one transaction through a contract.
