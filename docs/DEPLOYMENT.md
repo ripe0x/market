@@ -67,18 +67,20 @@ Prerequisites: a keystore whose account holds at least 0.05 Sepolia ETH, and `ET
 1. Deploy and verify:
 
    ```bash
-   forge script script/Deploy.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --verify --slow
+   forge script script/Deploy.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --verify --slow --gas-estimate-multiplier 1500
    ```
 
 2. Run the lifecycle with real transactions, then cancel the bid it prints:
 
    ```bash
-   forge script script/Lifecycle.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --slow
+   forge script script/Lifecycle.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --slow --gas-estimate-multiplier 1500
    ```
 
    ```bash
-   forge script script/Lifecycle.s.sol --sig "recover(address)" <bid order> --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast
+   forge script script/Lifecycle.s.sol --sig "recover(address)" <bid order> --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --gas-estimate-multiplier 1500
    ```
+
+**Why `--gas-estimate-multiplier 1500`.** On 2026-11-06 Sepolia charged far more gas for contract creation than mainnet and Foundry 1.8.1's built-in EVM: the node estimated 5,775,008 gas for deploying Market, against 841,793 on mainnet and 826,340 in Foundry. A first attempt with Foundry's default limits ran out of gas and reverted (transaction `0xc216fbee9d3b87b6aeac0f91deec301a9aa65002193f8f40917166f55f44a52e`, no state change, 0.0000375 ETH). The multiplier sets each limit at 15 times Foundry's estimate; unused gas is not charged. `--skip-simulation` would take limits from the node instead, but the node cannot estimate transactions that depend on earlier ones in the same run. For the same reason, `script/rehearse.sh` on a Sepolia fork does not reproduce Sepolia's gas prices. Mainnet needs no multiplier.
 
 3. Record chain ID, addresses, transaction hashes (in `broadcast/*/11155111/run-latest.json`) and explorer links under "Deployment record".
 
