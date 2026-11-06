@@ -25,6 +25,7 @@
 | Market | Deploy orders | Anything else; change the implementation | `test_marketHoldsNoAuthority`, `test_implementationCannotBeReplaced` |
 | The implementation | Nothing | Be filled, executed, closed or initialized; receive ETH or safe token transfers | `test_implementationIsNotAnOrder` |
 | `FillVerifier` | Read state with `staticcall` | Change state anywhere, hold assets, use approvals | `test_queriesCannotChangeState` |
+| `NFTBid` handler | Move a token approved to it, from the account that called `fill` on a genuine `Order` clone bound to it, during that fill, to that order's `recipient` | Move a token for a direct caller, a fake order, an order bound to another handler, or a closed order's owner; move from anyone but the filler | `test_bidderCannotStealApprovedTokens`, `test_otherOrdersCannotUseTheHandlersApproval`, `invariant_noTheft` |
 | `CapitalPool` owner (example) | Grant, revoke, withdraw | Draw for an order | `test_poolGrantAccruesToCap`, `test_revokedGrantStopsDraws` |
 
 ## Properties
@@ -91,7 +92,7 @@
 1. **Handlers are trusted code, often shared.** A buggy or hostile handler can spend everything its orders hold during any fill, and anyone can start a fill. A bug in a handler used by hundreds of orders is a bug in all of them. Isolation limits which accounts a handler can act through (only orders bound to it, only while they are filling); it does not make a defective or hostile handler safe. Market contains the damage to orders that chose that handler and nothing more.
 2. **Mutable handlers.** The code-hash pin fixes a handler's bytecode, not its behaviour. Proxies, `delegatecall` to other code, owner switches and reads of mutable contracts hand their controller every bound order's authority during fills. Market cannot detect them (D006); a reader of the handler's code can.
 3. **Filler protection is the filler's job** (D009). A plain EOA filling an unknown handler can lose what it sends. Fill from a contract or batching wallet that checks the outcome, for example with `FillVerifier` (`test/Eip7702Filler.t.sol`), or fill only handlers you have read. `FillVerifier` compares what you ask it to compare: `balanceOf` on an NFT collection is satisfied by any token, so check `ownerOf` for a specific one, and query the asset's contract, not the order or its handler. A delta also counts unrelated inflows during the batch.
-4. **Approvals given to an order** are usable by its handler during any fill and by its owner once it is closed. `setApprovalForAll` to an order exposes the whole collection to that handler.
+4. **Approvals given to an order** are usable by its handler during any fill and by its owner once it is closed. An approval from a counterparty to an order is therefore an approval to that order's owner, who can close the order and spend it before the counterparty's fill lands (finding A1). Approve an order only for your own order, or approve and fill atomically. `NFTBid` takes approvals itself for this reason (D205); a bug in it would expose every token approved to it.
 5. **Third-party contracts are trusted for their own behaviour.** A hostile NFT collection can lie in `ownerOf`; a hostile token can lie in `balanceOf`. Configs bind specific contracts; choosing them is the creator's responsibility.
 6. **Blocking payees.** A configured payee that reverts on ETH blocks the example handlers' fills.
 7. **External capital is conditional** and can disappear between a quote and a fill.
@@ -99,7 +100,7 @@
 9. **Return data size.** `execute` copies the callee's full return data; a hostile callee chosen by the creator or filler can make a fill expensive. It can only grief a transaction its own participant chose.
 10. **CREATE2 collision gas.** Creating the same commitment twice reverts after consuming the gas given to the deployment.
 11. **Toolchain.** via-IR compilation and transient storage are relatively new. The full suite runs on Solidity 0.8.30 for Prague; the core, clone and composition suites also pass on 0.8.28 for Cancun.
-12. **No fork tests.** The examples use local mock tokens and NFTs. No real mainnet assets or contracts were exercised. The deploy script has been simulated against mainnet RPC only.
+12. **Fork coverage is limited to the NFT handlers.** `NFTSale` and `NFTBid` are tested against real collections on a pinned mainnet fork (`test/fork/NFTFork.t.sol`). The examples use only local mock tokens and NFTs.
 13. **Collection-wide bids pay for any token.** `AcquisitionBid` accepts every token of its collection at up to the current maximum, so sellers will offer the least valuable ones. A creator who cares needs a handler that narrows eligibility, for example to a token id range or an allowlist; a strategy cannot, since it never sees the token id.
 14. **One implementation for every order.** A bug in `Order` is a bug in every order, with no way to patch deployed orders. This was already true of identical full contracts; clones add one shared address that cannot be destroyed or replaced.
 15. **Counterfactual addresses depend on the handler's code.** `orderAddress` uses the handler's current code hash. Predicting an order for a handler that is not yet deployed gives a different address from the one `create` will use; deploy the handler first.
@@ -108,8 +109,17 @@
 18. **An active order is a commitment of authority, not an escrow guarantee.** It may be unfunded, its handler may deliberately move assets during fills, and permissions others granted it can be revoked by them. Read the handler and the current state before relying on an order.
 19. **Owners cannot service active orders.** Anything that needs the order itself to act after creation (grant or refresh an approval, accept a two-step ownership transfer, claim an airdrop, vote) is possible only through the handler during a fill, or after closing. A handler without such a path leaves those actions until the order is closed.
 20. **Nested fills on a shared handler.** While two orders bound to one handler are both filling, the handler can act through either. Only the handler's discipline keeps them apart (threats above).
+21. **NFT handler assumptions.** Collections are trusted to report `ownerOf` honestly; a royalty receiver that reverts blocks every fill of its collection; collections that do not report ERC2981 through ERC165 pay no royalty; collection-wide bids pay for the least valuable eligible token. See [NFT_TRADING.md](NFT_TRADING.md), "Security assumptions".
 
 ## Review findings
+
+### Author finding A1: approvals to counterparty-owned orders
+
+Found 2026-11-06 while building `NFTBid`, by the implementing agent. Severity for the examples: high for an EOA filler who approves and fills in separate transactions; the core behaves as specified (D003).
+
+An order's owner can close the order at any moment and then make any call as the order. A filler who approves an order to pull payment or a token (as `AcquisitionBid` and `TokenExchange` ask) has approved the order's owner too: the owner can watch for the approval, close the order and spend it before the fill lands. Proof: `test_approvalToOrderIsStealableInTheExample` in `test/NFTBid.t.sol`.
+
+Resolution: `NFTBid` holds sellers' approvals itself and accepts calls only from genuine, filling orders bound to it (D205). The rule for handler authors now says when a handler may hold approvals. `AcquisitionBid` and `TokenExchange` are unchanged teaching examples with a warning in their NatSpec; owner review item 6 in DECISIONS.md. Not a change to the core, which is left for the owner to decide.
 
 ### First review
 

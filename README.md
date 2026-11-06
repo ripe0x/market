@@ -49,6 +49,7 @@ The design question behind every choice here: **can an independent developer cre
 | [`Order`](src/Order.sol) | Holds assets, permissions, configuration and the execution lifecycle. Each order is its own account and enforces who may make it act. | This repository |
 | OrderHandler | Any contract implementing [`IOrderHandler`](src/Order.sol). Defines what happens when an order is filled: checks conditions, decides which calls the order makes, keeps state between fills. | Anyone |
 | Fill | One actual execution of an order: a call to `Order.fill`, inside which the handler runs. | Anyone may fill |
+| [`NFTSale`](handlers/NFTSale.sol), [`NFTBid`](handlers/NFTBid.sol) | Reference handlers for ERC721 listings and funded bids in native ETH, with fixed, falling or rising prices and ERC2981 royalties. See [docs/NFT_TRADING.md](docs/NFT_TRADING.md). | This repository |
 | [`FillVerifier`](periphery/FillVerifier.sol) (optional) | Lets a filler's wallet or contract check its own receipt in the same transaction as its fill. Market does not use it. | This repository |
 
 The whole core is 206 lines of Solidity including comments, 117 of them code. It contains no signature checking, no registry, no upgrade path and no privileged address. Its only `delegatecall` is each clone's call into the fixed implementation; nothing can change that implementation.
@@ -114,7 +115,7 @@ Market keeps three things apart:
 
 1. **Authorization** is held by the order. The owner provides it however the asset or contract allows: a transfer, an ERC20 or ERC721 approval, a role in an artwork, a grant in a treasury. Anyone can add to it while the order is active, for example by sending more tokens or ETH.
 2. **Execution** is decided by the handler, using that authority, and only inside a fill.
-3. **Consideration** is whatever the handler requires of the filler. Market passes the handler the caller, the ETH sent with the fill and the caller's input. A handler can require ETH (already in the order when the handler runs), pull tokens from the caller under an approval the caller gave this specific order, or require something else entirely, such as an NFT delivered to a recipient.
+3. **Consideration** is whatever the handler requires of the filler. Market passes the handler the caller, the ETH sent with the fill and the caller's input. A handler can require ETH (already in the order when the handler runs), pull tokens from the caller, or require something else entirely, such as an NFT delivered to a recipient. Pulling under an approval the caller gave the order itself is safe only if the caller approves and fills atomically: the order's owner can close it and spend that approval (rule 2 below).
 
 Native ETH is not wrapped and not special. `fill` is payable, the ETH lands in the order, and the handler pays it out, refunds it, or keeps it as part of the order's capital. ERC20s and any other asset are handled by the handler calling their contracts as the order. The core has no asset logic at all.
 
@@ -224,9 +225,13 @@ Example 4's bid rises with time, is capped by its capital, records what it actua
 
 The owner of an active order has no `execute`, by design: anything the order holds leaves only through its handler. A creator who wants to manage an order without closing it (rebalance inventory, withdraw part of the capital, refresh an approval the order gives) chooses a handler that offers an explicit maintenance fill, for example one that accepts a withdrawal only when `caller == Order(msg.sender).owner()`. Fillers then see that power in the handler's code. [test/SharedHandler.t.sol](test/SharedHandler.t.sol) (`RestockableSale`) shows one. None of the four examples offers maintenance; their owners close and recover.
 
+## Reference NFT trading handlers
+
+[`NFTSale`](handlers/NFTSale.sol) and [`NFTBid`](handlers/NFTBid.sol) are the handlers to use for trading ERC721s for ETH. A sale escrows one token in its order; a bid escrows ETH and buys one token or up to `maxFills` tokens of a collection. Prices follow a schedule (fixed, falling or rising), the buyer's spend is one number, ERC2981 royalties are paid out of it and never skipped, buyers cap the price and sellers set their minimum. They are tested against BAYC, Azuki, Moonbirds, Opepen, Chimpers and ENS on a mainnet fork. Semantics, lifecycle commands, security assumptions, compatibility and gas against Seaport: [docs/NFT_TRADING.md](docs/NFT_TRADING.md).
+
 ## The four examples
 
-All four use the same `Market` and `Order`, unchanged.
+All four use the same `Market` and `Order`, unchanged. They are teaching examples, kept small; for NFT trading use the reference handlers above. Examples 2 and 4 take approvals to their own orders, which is unsafe for fillers who approve and fill in separate transactions (finding A1 in [docs/SECURITY.md](docs/SECURITY.md)).
 
 | # | Handler | What it demonstrates | Tests |
 | --- | --- | --- | --- |
@@ -265,8 +270,8 @@ The bell's owner makes the order the only account allowed to call `ring()`, and 
 
 These are the habits the examples follow. Breaking one usually means a filler or creator can lose assets.
 
-1. **Act only through the calling order.** A handler should hold no assets, no approvals and no roles. Anyone can call a handler directly, pretending to be an order, so authority given to the handler itself is shared by everyone.
-2. **Take only from `caller`.** Never pull from an address named in `input`; anyone could name someone who approved your order.
+1. **Act only through the calling order.** A handler should hold no assets, no approvals and no roles. Anyone can call a handler directly, pretending to be an order, so authority given to the handler itself is shared by everyone. The one exception is a handler that must pull a filler's assets (rule 2): it may hold the filler's approval if it first proves the call comes from a genuine `Order` clone bound to it and filling, as [`NFTBid`](handlers/NFTBid.sol) does.
+2. **Take only from `caller`, and not under an approval to the order.** Never pull from an address named in `input`; anyone could name someone who approved your order. And an approval a filler gives the order is also usable by the order's owner after closing it, so a filler who approves first and fills later can be robbed. Have fillers approve the handler (rule 1's exception) or send assets with the fill.
 3. **Never forward arbitrary calldata from `input` to `execute`.** Build every call yourself. A filler-chosen target and data would let the filler use all of the order's authority.
 4. **Use `value` for the fill's ETH,** not the order's balance, which may include the order's own capital.
 5. **Key state by `msg.sender`.** Then only an order can change its own state, and orders sharing the handler never see each other's. When fills nest (a fill of order A leads to a fill of order B on the same handler), both orders accept the handler at once; only this rule and rule 1 keep their state and authority apart.
@@ -297,6 +302,12 @@ forge test --match-path test/Gas.t.sol --isolate
 ```
 
 ```bash
+forge test --match-path "test/fork/*" --isolate
+```
+
+Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tenderly.co`, and pin block 26,357,000.
+
+```bash
 script/demo.sh
 ```
 
@@ -306,7 +317,7 @@ script/demo.sh
 
 1. **Deployment gas.** Every order is its own account: about 94,000 to 97,000 gas to create as a clone, against zero for a signed Seaport order. At 0.1 gwei that is about 0.00001 ETH; at 5 gwei, about 0.0005 ETH. The price of the clone is about 4,100 to 5,200 more gas per fill than a full contract (which cost about 484,000 to create), for the `delegatecall` into the shared implementation. Measurements in D004, [docs/DECISIONS.md](docs/DECISIONS.md).
 2. **Escrow compatibility.** Assets an order holds are not in the owner's wallet. Other marketplaces will not show them as the owner's, and an order cannot sign (it has no EIP-1271 support), so it cannot list itself elsewhere. The owner can take assets back at any time by closing the order, which ends it; changing an active order's holdings needs a handler that allows it.
-3. **Delegation risk.** An approval to an order is usable by its handler during any fill and by its owner once the order is closed. Prefer approving one token or an exact amount. `setApprovalForAll` to an order exposes the whole collection to that order's handler.
+3. **Delegation risk.** An approval to an order is usable by its handler during any fill and by its owner once the order is closed, so approve only your own orders. `NFTBid` sellers approve the handler instead; a bug in it would expose every token approved to it, so approve one token rather than the collection when you can.
 4. **Externally funded availability.** A bid backed by a grant is only as good as the grant at the moment of the fill. Quotes from `currentBid` can vanish.
 5. **Limits of generalized validation.** Market cannot tell a filler what an order will do. Config is opaque, discovery means understanding the handler, and a filler either trusts a known handler or checks its own receipt.
 6. **Payees and callbacks.** A handler that pays addresses chosen by the creator can be blocked by one of them reverting. That is the creator's configuration; the examples document it rather than adding pull payments.
@@ -321,10 +332,11 @@ There is no fee to switch on, no administrator to persuade, no registry to join 
 ```
 src/        Market.sol, Order.sol (with IOrderHandler): the core
 periphery/  FillVerifier.sol: optional receipt checks for fillers
-examples/   the four example applications and their helpers
-test/       Foundry unit, fuzz, invariant, composition and gas tests
+handlers/   NFTSale, NFTBid (reference NFT trading) and HandlerBase
+examples/   the four teaching examples and their helpers
+test/       Foundry unit, fuzz, invariant, composition and gas tests; test/fork: mainnet fork tests
 script/     Deploy.s.sol (dry run), Demo.s.sol + demo.sh (local anvil)
-docs/       SPEC.md, SECURITY.md, DECISIONS.md, STATUS.md
+docs/       SPEC.md, NFT_TRADING.md, SECURITY.md, DECISIONS.md, STATUS.md
 ```
 
 Earlier work on an NFT-only marketplace is preserved on the `claude/market-nft-implementation-d5c4ea` branch for reference. This branch shares no code with it.

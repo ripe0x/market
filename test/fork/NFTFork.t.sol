@@ -220,10 +220,26 @@ contract NFTForkTest is Test {
         assertEq(address(order).balance, 1 ether);
     }
 
+    function test_depositGas() public {
+        address holder = BAYC.ownerOf(1);
+        bytes memory config = abi.encode(NFTSale.Config(BAYC, 1, _schedule(10 ether, 1 ether), proceeds, 1000));
+        vm.prank(holder);
+        Order listing = market.create(sale, config, bytes32(++salt));
+        vm.prank(holder);
+        BAYC.transferFrom(holder, address(listing), 1);
+        vm.snapshotGasLastCall("NFTFork", "deposit: BAYC into sale");
+    }
+
     /// Cancel a real listing and a funded bid; everything returns to its owner.
     function test_cancelAndRecover() public {
         address holder = AZUKI.ownerOf(1);
-        (Order listing,) = _list(AZUKI, 1, 1000);
+        bytes memory saleConfig = abi.encode(NFTSale.Config(AZUKI, 1, _schedule(10 ether, 1 ether), proceeds, 1000));
+        vm.prank(holder);
+        Order listing = market.create(sale, saleConfig, bytes32(++salt));
+        vm.snapshotGasLastCall("NFTFork", "create: sale");
+        vm.prank(holder);
+        AZUKI.transferFrom(holder, address(listing), 1);
+        vm.snapshotGasLastCall("NFTFork", "deposit: Azuki into sale");
         vm.startPrank(holder);
         listing.close();
         vm.snapshotGasLastCall("NFTFork", "close: sale");

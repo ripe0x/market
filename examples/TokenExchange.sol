@@ -12,6 +12,11 @@ import {HandlerBase} from "../handlers/HandlerBase.sol";
 /// to the owner only after closing, since this handler offers no maintenance fill.
 /// Input: `(amount of give, recipient)`.
 /// The filler approves this order (not the handler) for the `take` owed.
+///
+/// Unsafe for EOA buyers (SECURITY.md, finding A1): a buyer approves this order for payment,
+/// and the order's owner can close it and use that approval before the buyer's fill lands.
+/// Approve and fill atomically (a contract or batching wallet), or use exact approvals only
+/// immediately before filling an order whose owner you trust. Teaching example only.
 contract TokenExchange is HandlerBase {
     struct Config {
         IERC20 give;
