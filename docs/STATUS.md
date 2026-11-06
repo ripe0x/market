@@ -32,6 +32,10 @@ Toolchain: forge 1.8.1, solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run
 | Check | Command | Result |
 | --- | --- | --- |
 | Core merge candidate | `CANDIDATE_RUN=1 forge test` at `5a5ded8` | 148 passed, 0 failed; CI `forge` job green |
+| Full suite, combined candidate | `CANDIDATE_RUN=1 forge test` at `e1e5d5a` (everything below plus core, examples and review PoCs) | Exit 0. 207 passed, 0 failed, 21 suites, including the 14 fork tests |
+| Sizes | `forge build --sizes` | Runtime bytes: `Order` 2,133, `Market` 1,277, `NFTSale` 2,858, `NFTBid` 3,424, `FillVerifier` 1,058, `PaintAction` 1,628 |
+| Local demo | `script/demo.sh` | All four teaching examples on anvil: success |
+| Independent review | AI agent, NFT handlers at `df609b8` | No critical, high, medium or low findings; N1, N2 informational. 4 PoC tests pass (SECURITY.md, fourth review) |
 | NFT handler unit and fuzz tests | `forge test --match-path "test/NFT{Sale,Bid}.t.sol"` | 40 passed (23 sale, 17 bid), fuzz 1,000 runs each |
 | NFT invariants | `forge test --match-path test/NFTInvariant.t.sol` | 5 invariants, 128 runs x 64 calls, 0 reverts; 1,018 theft attempts, none succeeded |
 | Deep invariants | `FOUNDRY_INVARIANT_RUNS=1000 FOUNDRY_INVARIANT_DEPTH=128 forge test --match-test invariant` | All 10 invariants of both suites hold, 128,000 calls each, 0 reverts |
