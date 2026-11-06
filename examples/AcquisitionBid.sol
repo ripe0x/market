@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {HandlerBase} from "./HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 
 /// @notice Prices an acquisition bid. Read with `staticcall`; may not change state.
 interface IBidStrategy {

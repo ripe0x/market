@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {AcquisitionBid, ICapitalSource, IBidStrategy} from "../examples/AcquisitionBid.sol";

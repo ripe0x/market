@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Order} from "../src/Order.sol";
 import {AcquisitionBid, ICapitalSource} from "../examples/AcquisitionBid.sol";
 import {CapitalPool} from "../examples/CapitalPool.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {Base} from "./utils/Base.sol";
 import {Reenterer, TestNFT} from "./utils/Mocks.sol";
 

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IOrderHandler, Order} from "../../src/Order.sol";
-import {HandlerBase} from "../../examples/HandlerBase.sol";
+import {HandlerBase} from "../../handlers/HandlerBase.sol";
 import {DutchAuction} from "../../examples/DutchAuction.sol";
 import {CapitalPool} from "../../examples/CapitalPool.sol";
 import {AcquisitionBid, ICapitalSource, IBidStrategy} from "../../examples/AcquisitionBid.sol";

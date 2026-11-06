@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Order} from "../src/Order.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {Base} from "./utils/Base.sol";
 import {Reenterer, Rejecter} from "./utils/Mocks.sol";
 

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {HandlerBase} from "./HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 
 /// @title TokenExchange
 /// @notice Example 2. The order holds `give` tokens and releases them at a fixed rate for
