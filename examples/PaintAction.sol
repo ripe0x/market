@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Artwork} from "./Artwork.sol";
-import {HandlerBase} from "./HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 
 /// @title PaintAction
 /// @notice Example 3. Sells one change to an artwork: the buyer picks a color from the

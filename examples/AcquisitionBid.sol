@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {HandlerBase} from "./HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 
 /// @notice Prices an acquisition bid. Read with `staticcall`; may not change state.
 interface IBidStrategy {
@@ -33,6 +33,10 @@ interface ICapitalSource {
 /// above zero and within the maximum. Each acquisition records its clearing price for the next
 /// quote, so a gift at price zero is refused rather than recorded as a market price.
 /// Capital may arrive at any time, in the order or in the source.
+///
+/// Unsafe for EOA sellers (SECURITY.md, finding A1): a holder approves this order, and the
+/// order's owner can close it and use that approval before the holder's fill lands. Teaching
+/// example only; `handlers/NFTBid.sol` is the production bid.
 contract AcquisitionBid is HandlerBase {
     struct Config {
         IERC721 nft;

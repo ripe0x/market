@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Order} from "../src/Order.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {Base} from "./utils/Base.sol";
 import {FalseToken, FeeToken, NoReturnToken, TestToken} from "./utils/Mocks.sol";

@@ -10,7 +10,7 @@ import {RisingStrategy} from "../examples/BidStrategies.sol";
 import {CapitalPool} from "../examples/CapitalPool.sol";
 import {DutchAuction} from "../examples/DutchAuction.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {TokenExchange} from "../examples/TokenExchange.sol";
 import {TestNFT, TestToken} from "../test/utils/Mocks.sol";
 

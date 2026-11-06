@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../../src/Market.sol";
 import {IOrderHandler, Order} from "../../src/Order.sol";
-import {HandlerBase} from "../../examples/HandlerBase.sol";
+import {HandlerBase} from "../../handlers/HandlerBase.sol";
 import {DutchAuction} from "../../examples/DutchAuction.sol";
 import {TokenExchange} from "../../examples/TokenExchange.sol";
 import {PaintAction} from "../../examples/PaintAction.sol";

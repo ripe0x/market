@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {HandlerBase} from "./HandlerBase.sol";
+import {HandlerBase} from "../handlers/HandlerBase.sol";
 
 /// @title DutchAuction
 /// @notice Example 1. Sells one ERC721 held by the order for ETH. The price falls linearly from
