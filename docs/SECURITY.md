@@ -9,6 +9,7 @@
 | `Market`, the `Order` implementation | Everyone | The authority rules in [SPEC.md](SPEC.md). Immutable, no owner. Every order runs the one implementation, so a bug in it affects all orders at once. |
 | Handler | The order's creator | Everything the order does during fills. One handler may serve many orders, so a bug in it affects all of them. Fillers trust it only as far as they have read it or verify their own receipt. |
 | Strategy, capital source, artwork, NFT collection, token | Whoever configured or chose them | Their own behaviour. Market cannot check any of it. |
+| `NFTSale`, `NFTBid` | Creators who bind orders to them; holders who approve `NFTBid` | The terms in [NFT_TRADING.md](NFT_TRADING.md). Immutable, no owner. `NFTBid` holds the approvals of every holder who approves it, so a bug in it exposes those tokens. |
 | `FillVerifier` (optional) | Fillers who choose to call it | Comparing the numbers and bytes they ask it to compare. It holds and moves nothing. |
 | Filler's input | Nobody | Handlers must validate it. |
 | Indexers, frontends | Nobody | Optional. Everything needed to fill is in `Market.Created` and calldata. |

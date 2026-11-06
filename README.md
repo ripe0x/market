@@ -10,6 +10,8 @@ This is an experiment and a public good, closer to an artwork in protocol form t
 
 > **Status: experimental, unaudited.** The contracts compile and pass the tests described in [docs/STATUS.md](docs/STATUS.md). That is evidence about the tested behaviour, not a safety claim. Nothing is deployed.
 
+**Start here:** [docs/HANDLERS.md](docs/HANDLERS.md) to write a handler or fill an order, [docs/NFT_TRADING.md](docs/NFT_TRADING.md) for the NFT sale and bid handlers, [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for addresses and deployment.
+
 ## The idea in one paragraph
 
 **Market creates orders. Orders hold authority. OrderHandlers define behavior. Fills execute that behavior.**
@@ -311,7 +313,7 @@ Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tender
 script/demo.sh
 ```
 
-`script/demo.sh` starts a throwaway anvil node, runs all four examples against one Market from anvil's unlocked default accounts, and stops the node. `script/Deploy.s.sol` deploys Market (which deploys the `Order` implementation), `FillVerifier` and the example handlers through the standard CREATE2 deployer so every chain gets the same addresses; without `--broadcast` it only simulates. See [docs/STATUS.md](docs/STATUS.md) for the exact commands, results and gas.
+`script/demo.sh` starts a throwaway anvil node, runs all four examples against one Market from anvil's unlocked default accounts, and stops the node. `script/Deploy.s.sol` deploys Market (which deploys the `Order` implementation), the NFT handlers, `FillVerifier` and the example handlers through the standard CREATE2 deployer so every chain gets the same addresses; without `--broadcast` it only simulates. `script/rehearse.sh` runs the deployment and a full lifecycle on a throwaway fork. Details in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). See [docs/STATUS.md](docs/STATUS.md) for the exact commands, results and gas.
 
 ## Tradeoffs
 
@@ -336,7 +338,8 @@ handlers/   NFTSale, NFTBid (reference NFT trading) and HandlerBase
 examples/   the four teaching examples and their helpers
 test/       Foundry unit, fuzz, invariant, composition and gas tests; test/fork: mainnet fork tests
 script/     Deploy.s.sol (dry run), Demo.s.sol + demo.sh (local anvil)
-docs/       SPEC.md, NFT_TRADING.md, SECURITY.md, DECISIONS.md, STATUS.md
+docs/       HANDLERS.md (developer guide), NFT_TRADING.md, DEPLOYMENT.md, SPEC.md,
+            SECURITY.md, DECISIONS.md, STATUS.md
 ```
 
 Earlier work on an NFT-only marketplace is preserved on the `claude/market-nft-implementation-d5c4ea` branch for reference. This branch shares no code with it.

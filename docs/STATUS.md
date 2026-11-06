@@ -1,75 +1,72 @@
 # Status
 
-Updated 2026-11-05. Branch `feat/execution-protocol-v1`.
+Updated 2026-11-06. Branches `feat/nft-trading` (milestone 2) and `feat/deployment` (milestone 4, on top of it).
 
 ## State
 
-Exploratory implementation, complete for the first milestone: the core, four examples, a fifth minimal order type, an optional fill verifier, tests, local demo and dry-run deployment. On 2026-11-05 orders became ERC-1167 clones after owner review (DECISIONS D004). In a second review the same day, Policy was renamed OrderHandler (D017) and active orders were committed to their handler: while an order is active only its handler can make it act, and only during a fill; the owner can close it and act only after closing (D003). **Not audited, not deployed.** No mainnet transaction, funded signing or paid service has been used.
+The experimental core (`src/`) was merged to `main` on 2026-11-06 (PR #2, merge commit `46b7794`) after its full suite passed (148/148) with green CI. On top of it:
+
+1. **Reference NFT trading handlers** `NFTSale` and `NFTBid` (`handlers/`), with fixed, falling and rising prices, ERC2981 royalties paid from the price and never skipped, buyer and seller limits, escrow, persistent bids and cancellation. No core change.
+2. **Finding A1**: an approval a filler gives an order is usable by the order's owner after closing. `NFTBid` holds sellers' approvals itself and authenticates orders (D205); the teaching examples that take approvals to their orders carry warnings. Owner decision pending (DECISIONS, Owner review 6).
+3. **Mainnet fork tests** against BAYC, Azuki, Moonbirds, Opepen, Chimpers, ENS and CryptoPunks.
+4. **Deployment**: CREATE2 deployment script, lifecycle script exercising sales, a persistent bid and PaintAction, fork rehearsal script, Sepolia and mainnet commands, release checklist.
+5. **Developer documentation**: [HANDLERS.md](HANDLERS.md), [NFT_TRADING.md](NFT_TRADING.md), [DEPLOYMENT.md](DEPLOYMENT.md).
+
+**Not audited. Not deployed to any public chain.** No mainnet transaction, funded signing or paid service has been used.
 
 | Area | State |
 | --- | --- |
-| Core (`src/`) | Implemented: `Market`, `Order` (clone implementation), `IOrderHandler` |
-| Periphery (`periphery/`) | Implemented: `FillVerifier`, optional |
-| Example 1, NFT sale (`DutchAuction`) | Implemented and tested |
-| Example 2, ERC20 exchange (`TokenExchange`) | Implemented and tested |
-| Example 3, artwork action (`PaintAction`, `Artwork`) | Implemented and tested |
-| Example 4, persistent bid (`AcquisitionBid`, strategies, `CapitalPool`) | Implemented and tested; price 0 refused |
-| New order type without core change (`BellHandler`) | Test only |
-| Owner maintenance through a handler (`RestockableSale`) | Test only (`test/SharedHandler.t.sol`) |
-| Composition (sale matched into bid) | Test only (`Matcher` in `test/Compose.t.sol`) |
-| Filler-side receipt checks | Contract fillers (`test/Compose.t.sol`); EIP-7702 delegated EOA with a generic batch executor and `FillVerifier` (`test/Eip7702Filler.t.sol`) |
-| Local demo | `script/demo.sh` runs all four examples on anvil, including closing and recovering an exchange's unsold inventory |
-| CI | `.github/workflows/test.yml`: `forge build --sizes` and `forge test` on pull requests and pushes to `main`, Foundry v1.8.1 |
-| Deployment | `script/Deploy.s.sol` simulated locally and against mainnet RPC; never broadcast |
-| Frontend, indexer, keeper | Not built (out of scope for this milestone) |
+| Core (`src/`) | Merged to `main`; unchanged since |
+| Reference handlers (`handlers/`) | `NFTSale`, `NFTBid`, `NFTTrade`, `HandlerBase`; unit, fuzz, invariant and fork tested |
+| Teaching examples (`examples/`) | Unchanged apart from NatSpec warnings (A1) and the `HandlerBase` move |
+| Non-NFT example | `PaintAction` + `Artwork`: unit tests, documented end to end in HANDLERS.md, executed by `script/Lifecycle.s.sol` |
+| Periphery | `FillVerifier`, unchanged |
+| Deployment | Rehearsed on Sepolia and mainnet forks. **Sepolia broadcast not done**: see Blockers |
+| CI | `forge build --sizes`, the suite without fork tests, and the fork tests as a separate job |
+| Frontend, indexer, keeper | Out of scope |
 
 ## Evidence
 
-Candidate: code at commit `dd71a9e`; the commit after it adds only comments, documentation and the third review's PoC tests, and the full suite was rerun on it. Coverage, the compiler matrix and the deploy dry run ran on `dd71a9e`. Toolchain: forge 1.8.1 (`982849d`), solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run 2026-11-05.
+Toolchain: forge 1.8.1, solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run 2026-11-06.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Full suite | `CANDIDATE_RUN=1 forge test` | Exit 0. 148 passed, 0 failed, 16 suites. Fuzz tests 1,000 runs each. (142 passed, 15 suites, on `dd71a9e` before the third review's PoC file.) |
-| Invariants | (in the full suite) `test/Invariant.t.sol` | 5 invariants, 128 runs x 64 calls = 8,192 calls, 0 reverts. In the final campaign: 906 attacker calls and 904 owner attempts to take from active orders, none succeeded. |
-| Gas | `forge test --match-path test/Gas.t.sol --isolate` | `snapshots/GasTest.json`, table below. |
-| Coverage | `CANDIDATE_RUN=1 forge coverage --ir-minimum --report summary --no-match-coverage 'test\|script\|lib'` | `src/`, `periphery/` and `examples/`: 93.0% lines (213/229), 92.6% statements (274/296), 84.8% branches (39/46), 98.0% functions. `Market`, `Order` and `FillVerifier` branches 100%; their uncovered lines are inline assembly, which `--ir-minimum` coverage does not attribute. Approximate. |
-| Sizes | `forge build --sizes` | `Order` implementation 2,133 bytes runtime, `Market` 1,277, `FillVerifier` 1,058; each order clone 149 bytes; largest example `Artwork` 3,813. |
-| Compiler and EVM | `forge build --use <solc> --evm-version <evm> src periphery examples` | Compiles with solc 0.8.28 and 0.8.30, each for Cancun and Prague. `forge test --use 0.8.28 --evm-version cancun --match-path "test/{Core,Clone,Compose,SharedHandler}.t.sol"`: 51 passed. |
-| Local demo | `script/demo.sh` | All four examples executed on a throwaway anvil node (chain 31337): "ONCHAIN EXECUTION COMPLETE & SUCCESSFUL". The exchange step tops up an active order, then closes it and recovers the unsold 50 GIVE. |
-| Deploy dry run | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` | Simulation only, nothing broadcast. Estimated 4,655,610 gas for Market (with the implementation), `FillVerifier` and six example contracts. Market's CREATE2 address would be `0x8210144750E6237740bf71b819f87A834905445d`, the implementation `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87`. |
-| Independent review | AI agent on `dd71a9e` | No critical, high, medium or low findings; four informational notes (H1 to H4), documented. PoC tests `test/review/LifecycleReviewPoC.t.sol`, 6 passed. See SECURITY.md, third review. |
+| Core merge candidate | `CANDIDATE_RUN=1 forge test` at `5a5ded8` | 148 passed, 0 failed; CI `forge` job green |
+| Full suite, combined candidate | `CANDIDATE_RUN=1 forge test` at `e1e5d5a` (everything below plus core, examples and review PoCs) | Exit 0. 207 passed, 0 failed, 21 suites, including the 14 fork tests |
+| Sizes | `forge build --sizes` | Runtime bytes: `Order` 2,133, `Market` 1,277, `NFTSale` 2,858, `NFTBid` 3,424, `FillVerifier` 1,058, `PaintAction` 1,628 |
+| Local demo | `script/demo.sh` | All four teaching examples on anvil: success |
+| Independent review | AI agent, NFT handlers at `df609b8` | No critical, high, medium or low findings; N1, N2 informational. 4 PoC tests pass (SECURITY.md, fourth review) |
+| NFT handler unit and fuzz tests | `forge test --match-path "test/NFT{Sale,Bid}.t.sol"` | 40 passed (23 sale, 17 bid), fuzz 1,000 runs each |
+| NFT invariants | `forge test --match-path test/NFTInvariant.t.sol` | 5 invariants, 128 runs x 64 calls, 0 reverts; 1,018 theft attempts, none succeeded |
+| Deep invariants | `FOUNDRY_INVARIANT_RUNS=1000 FOUNDRY_INVARIANT_DEPTH=128 forge test --match-test invariant` | All 10 invariants of both suites hold, 128,000 calls each, 0 reverts |
+| Mainnet fork | `forge test --match-path test/fork/NFTFork.t.sol --isolate` | 14 passed at block 26,357,000; gas in `snapshots/NFTFork.json` |
+| Static analysis | Slither 0.11.5 on `handlers/NFTBid.sol`, `handlers/NFTSale.sol`, `periphery/FillVerifier.sol`, `examples/PaintAction.sol` (and through them `src/`) with solc 0.8.30, informational and optimization excluded | No actionable result. Triage below |
+| Sepolia fork rehearsal | `script/rehearse.sh` | Deploy, Lifecycle and recover all succeed on chain 11155111 forked at block 12,077,938 |
+| Mainnet fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Same, chain 1 forked at block 26,357,257; deploy estimate 6,704,108 gas |
+| cast walkthrough | Commands in HANDLERS.md against local anvil | Create, escrow, quote and fill succeed as written |
 
-Tests per suite: Core 32, Clone 10, SharedHandler 5, FillVerifier 10, Eip7702Filler 4, DutchAuction 14, TokenExchange 13, PaintAction 11, AcquisitionBid 20, Compose 4, NewOrderType 1, Gas 6, Invariant 1 (5 invariants), first review PoC 5, second review PoC 6, third review PoC 6.
+Slither triage. `arbitrary-send-eth` (`Order.execute`): authorized by the lifecycle rules. `arbitrary-send-erc20` (`NFTBid._transfer`): `from` is the authenticated filler (D205). `locked-ether` (`Market`): `create` forwards its ETH into the new order. `reentrancy-no-eth`, `reentrancy-events` (`Order.fill`, handlers): reentry into the same order is refused by `filling`; events after calls only affect log order. `uninitialized-local` (`HandlerBase._pay`): zero start intended. `timestamp`: price schedules are time based by design. `missing-zero-check`: `execute` targets are the caller's choice. Running Slither over the whole project fails on a source-mapping error in `test/Invariant.t.sol`; production sources were analyzed directly.
 
 ### Gas
 
-Whole-transaction gas from isolated runs, including the 21,000 base cost and calldata. "Before" is the clone design before the lifecycle change (`4a15d12`); the full-contract column is the design before clones (`c8bad35`). D004 in DECISIONS.md also lists a storage-initialized clone.
+See [NFT_TRADING.md](NFT_TRADING.md#gas) for the full table and the Seaport comparison. Headline: a sale fill costs 162,746 to 217,139 gas and a bid fill 132,592 to 187,306 on real collections, within the range of direct Seaport single-order fills from the same blocks (111,622 to 273,243). Creating an order costs about 95,000; a listing also needs a deposit transaction (67,026 to 110,187).
 
-| Operation | Now | Before (clone) | Full contract |
-| --- | --- | --- | --- |
-| Create an order (any handler) | 93,973 to 96,890 | 93,973 to 96,890 | 482,124 to 485,024 |
-| Fill: DutchAuction, 1 payee, with refund, closes | 122,214 | 122,360 | 117,189 |
-| Fill: DutchAuction, 2 payees | 150,754 | 150,900 | 145,717 |
-| Fill: TokenExchange, first partial / repeat | 114,634 / 80,434 | 114,664 / 80,464 | 110,522 / 76,322 |
-| Fill: PaintAction, paint + resign + close | 111,432 | 111,578 | 106,416 |
-| Fill: AcquisitionBid, own funds / drawing from pool | 132,738 / 110,535 | 132,768 / 110,580 | 128,637 / 105,713 |
-| Owner closes | 47,129 | 46,994 | 44,173 |
-| Owner withdraws an NFT (after closing) | 64,080 | 61,966 | 59,073 |
+## Blockers
 
-The lifecycle change costs nothing on fills (30 to 146 gas cheaper, from function dispatch after the rename and `close` no longer reading the owner during a fill). Owner recovery costs 2,114 more because `execute` reads the cold `closed` flag, and closing 135 more because it reads `filling` first. Fills that pay an address for the first time include 25,000 gas for creating that account; first writes to a storage slot cost 20,000, which is why closing costs about 22,000. At a 0.1 gwei base fee, creating an order costs about 0.00001 ETH.
+1. **Sepolia deployment.** Keystores named `sepolia-deployer` and `keeper-sepolia` exist on this machine, but they are password protected and belong to other projects; no password or funded signer was provided. Everything else is done and rehearsed. To finish: run the three commands in [DEPLOYMENT.md](DEPLOYMENT.md#sepolia) with a funded keystore, then record the addresses and transaction hashes there.
+2. **Mainnet deployment** needs an independent human audit, the owner decisions in DECISIONS.md and the owner's explicit approval (release checklist in DEPLOYMENT.md).
 
 ## Not verified
 
-1. No fork tests against real mainnet tokens, NFT collections or artworks. All tests use local contracts, including deliberately hostile ones.
-2. No human audit. Three independent AI reviews (see SECURITY.md).
-3. EIP-7702 fillers are tested only in Foundry's local EVM (`test/Eip7702Filler.t.sol`), with a stand-in batch executor, not with real wallet software. `FillVerifier` gas inside a real batch was not measured.
-4. The full suite has run only on Solidity 0.8.30 with via-IR for Prague; on 0.8.28 for Cancun only the Core, Clone, Compose and SharedHandler suites.
-5. Gas figures are local measurements under Prague rules; real costs depend on calldata size, warm or cold accounts and gas price.
-6. Block explorer display and verification of clone orders has not been checked.
-7. Owner maintenance through a handler is shown with a test-only handler; none of the four examples offers it.
+1. No human audit. AI reviews only (SECURITY.md).
+2. No transaction on a public chain.
+3. Fork tests impersonate holders; real wallet software and real EIP-7702 delegates other than the one Opepen holder uses were not exercised.
+4. Explorer verification of the CREATE2 deployments and display of clone orders.
+5. The teaching examples have no fork tests.
+6. Gas figures are fork measurements under current rules; real costs depend on calldata, warm or cold accounts and gas price.
 
 ## Next actions
 
-1. Owner review of the items in DECISIONS.md, Owner review (license holder, cheap sales restarting the rising bid, the core's OpenZeppelin `Clones` import, setup and maintenance of active orders going through handlers).
-2. If the primitive holds up, fork tests with real assets (a mainnet ERC721 and USDC or USDT through `TokenExchange`), then an independent audit before any deployment that holds value.
-3. A minimal read-only page or script that lists orders from `Market.Created` and decodes known handlers, if useful for experiments.
+1. Owner: decide DECISIONS Owner review items, especially 6 (finding A1 and the teaching examples).
+2. Provide a funded Sepolia signer; run the Sepolia commands; record the deployment.
+3. Independent human audit of `src/`, `handlers/`, `periphery/` before any value-bearing deployment.
