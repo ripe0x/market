@@ -112,7 +112,7 @@ An order's owner can close it at any moment and then make any call as the order.
 
 So a token moves only when its holder fills a bid themself. A direct call, a fake order, a genuine order bound to another handler, and a closed order's owner are all refused (`test_bidderCannotStealApprovedTokens`, `test_otherOrdersCannotUseTheHandlersApproval`, the invariant campaign's theft attempts). A clone of the implementation deployed without Market still runs `Order`'s code and is as safe to accept (`test_cloneOutsideMarketIsStillAnHonestOrder`).
 
-The cost is the usual cost of an operator approval: a bug in `NFTBid` would expose every token approved to it. Approve one token rather than the collection when you can, and revoke when done.
+An approval also lets a phishing interface get a holder to sign a fill that pays an attacker's `proceedsTo`, one token per signed transaction (review N2); read what you sign. The cost is the usual cost of an operator approval: a bug in `NFTBid` would expose every token approved to it. Approve one token rather than the collection when you can, and revoke when done.
 
 ## Security assumptions
 

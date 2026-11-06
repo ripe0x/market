@@ -160,3 +160,14 @@ Independent AI review of the lifecycle change (commit `dd71a9e` against `4a15d12
 | H4 | Info | `CapitalPool` pays any granted address whose `filling()` returns true, so its safety rests on granting only real orders | Unchanged, example code. `CapitalPool`'s NatSpec now says to grant only addresses from `Market.Created`. |
 
 The reviewer confirmed with executed tests that an idle active order accepts nobody (fuzzed), that an owner's receive hook can neither close nor execute during a fill, that a handler keeps `execute` through the fill in which it closes the order and loses it afterwards, that a shared handler cannot reach a sibling that is not filling, and that a closed order's owner recovers the order's own ETH but cannot draw the pool. Not checked by the reviewer: the full suite, invariants and gas (run separately, STATUS.md), an EIP-7702 EOA delegated to a clone rather than the implementation, and third-party handlers beyond the examples.
+
+### Fourth review
+
+Independent AI review of the NFT handlers (`handlers/` at commit `df609b8`), given the code and the owner's requirements for NFT trading, not the author's conclusions or this document. Not a human audit. Proof-of-concept tests: `test/review/NFTReviewPoC.t.sol`, 4 tests, all pass as demonstrations. No critical, high, medium or low findings.
+
+| # | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| N1 | Info | `NFTSale.maxRoyaltyBps` may exceed 10,000; harmless because `royaltyOf` already refuses a royalty above the price (`test_info_maxRoyaltyBpsAboveDenominatorIsHarmless`) | No change. |
+| N2 | Info | A holder who approves `NFTBid` can still be phished into signing a fill naming an attacker's `proceedsTo`, one token per signed transaction; a router contract cannot sweep approved tokens because it becomes the caller itself (`test_phishingRouterCannotSweepApprovedTokens`) | Inherent to approval-based trading; documented in NFT_TRADING.md. Approve single tokens where possible. |
+
+The reviewer also confirmed `_isOrder` against OpenZeppelin's clone template (a look-alike clone cannot spoof the caller, `test_lookAlikeCloneCannotSpoofCaller`), that reentry during delivery cannot overfill a persistent bid (`test_deliveryReentrancyCannotOverfillSameBid`), ETH conservation, that royalties are never skipped, schedule edge cases, and cancellation paths.
