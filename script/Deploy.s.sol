@@ -51,27 +51,39 @@ abstract contract Addresses is Script {
 contract Deploy is Addresses {
     function run() external {
         vm.startBroadcast();
-        _deploy("Market", type(Market).creationCode);
-        console.log("Order implementation", market().implementation());
-        _deploy("NFTSale", type(NFTSale).creationCode);
-        _deploy("NFTBid", abi.encodePacked(type(NFTBid).creationCode, abi.encode(market())));
-        _deploy("FillVerifier", type(FillVerifier).creationCode);
-        _deploy("PaintAction", type(PaintAction).creationCode);
-        _deploy("DutchAuction", type(DutchAuction).creationCode);
-        _deploy("TokenExchange", type(TokenExchange).creationCode);
-        _deploy("AcquisitionBid", type(AcquisitionBid).creationCode);
-        _deploy("RisingStrategy", type(RisingStrategy).creationCode);
-        _deploy("CapitalShareStrategy", type(CapitalShareStrategy).creationCode);
+        // `new X{salt: SALT}` goes through the CREATE2 deployer and lets `--verify` find each
+        // contract. Each is skipped if its address already has code.
+        if (_absent(address(market()))) new Market{salt: SALT}();
+        if (_absent(address(nftSale()))) new NFTSale{salt: SALT}();
+        if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(market());
+        if (_absent(_at(type(FillVerifier).creationCode))) new FillVerifier{salt: SALT}();
+        if (_absent(address(paintAction()))) new PaintAction{salt: SALT}();
+        if (_absent(_at(type(DutchAuction).creationCode))) new DutchAuction{salt: SALT}();
+        if (_absent(_at(type(TokenExchange).creationCode))) new TokenExchange{salt: SALT}();
+        if (_absent(_at(type(AcquisitionBid).creationCode))) new AcquisitionBid{salt: SALT}();
+        if (_absent(_at(type(RisingStrategy).creationCode))) new RisingStrategy{salt: SALT}();
+        if (_absent(_at(type(CapitalShareStrategy).creationCode))) new CapitalShareStrategy{salt: SALT}();
         vm.stopBroadcast();
-        require(market().implementation().code.length != 0, "no implementation");
+
+        _log("Market", address(market()));
+        _log("Order implementation", market().implementation());
+        _log("NFTSale", address(nftSale()));
+        _log("NFTBid", address(nftBid()));
+        _log("FillVerifier", _at(type(FillVerifier).creationCode));
+        _log("PaintAction", address(paintAction()));
+        _log("DutchAuction", _at(type(DutchAuction).creationCode));
+        _log("TokenExchange", _at(type(TokenExchange).creationCode));
+        _log("AcquisitionBid", _at(type(AcquisitionBid).creationCode));
+        _log("RisingStrategy", _at(type(RisingStrategy).creationCode));
+        _log("CapitalShareStrategy", _at(type(CapitalShareStrategy).creationCode));
     }
 
-    function _deploy(string memory name, bytes memory initCode) internal {
-        address at = _at(initCode);
-        if (at.code.length == 0) {
-            (bool ok,) = CREATE2_FACTORY.call(abi.encodePacked(SALT, initCode));
-            require(ok && at.code.length != 0, name);
-        }
+    function _absent(address at) internal view returns (bool) {
+        return at.code.length == 0;
+    }
+
+    function _log(string memory name, address at) internal view {
+        require(at.code.length != 0, name);
         console.log(name, at);
     }
 }
