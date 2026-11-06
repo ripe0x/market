@@ -1,26 +1,33 @@
-# Market: Claude Code instructions
+# Market: project instructions
 
-This repository defines a small, independent Ethereum NFT selling product. The product allows a holder to authorize a price that declines over time and automatically sell to a compatible existing onchain offer once the seller's conditions can be met. It is unrelated to CC and must not inherit CC's contracts or tokenomics.
+Market is a permissionless, execution-agnostic Ethereum protocol. Market creates orders. Orders hold authority: each `Order` is an ERC-1167 clone of one fixed implementation with its terms in its code. OrderHandlers (`IOrderHandler`, "handlers") define behavior; one handler can serve many orders, and its code is pinned. Fills execute that behavior. While an order is active only its handler can make it act, and only during a fill; after the owner closes it, only the owner can. Read `README.md`, then `docs/SPEC.md`, `docs/SECURITY.md`, `docs/DECISIONS.md` and `docs/STATUS.md`.
 
-Read, in order: `CLAUDE.md`, `docs/FUNCTIONAL_SPEC.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md`, and `docs/STATUS.md`. Treat these documents as the current product baseline, then challenge and refine technical assumptions using evidence. Begin implementation immediately after reading. Do not end at a plan.
+## Layout
 
-## Engineering mandate
+- `src/` is the core: `Market.sol` (factory) and `Order.sol` (account implementation plus `IOrderHandler`). Its only dependency is OpenZeppelin `Clones`.
+- `periphery/` holds optional contracts Market never calls: `FillVerifier.sol`.
+- `examples/` holds application handlers and their helper contracts. Examples may use OpenZeppelin.
+- `test/` holds Foundry tests; shared setup in `test/utils/`.
+- `script/` holds `Deploy.s.sol` (dry run by default) and `Demo.s.sol` with `demo.sh` (local anvil).
 
-1. Complete the project: contracts if needed, realistic fork integrations, matcher, frontend, tests, economic and gas analysis, operations, and deployment preparation.
-2. Use Ponytail from the official `DietrichGebert/ponytail` plugin if available. If unavailable, use its central principle: understand existing code, prefer native platform features and established protocols, write the least code that works, and remove unnecessary abstractions. Do not apply shortcuts to security, accessibility, or money handling.
-3. Before implementing an exchange, test whether Seaport's native dynamic orders plus standard fulfillment can do the job. Write only the smallest security boundary that real settlement constraints require.
-4. Never mistake a mocked bid for a proven OpenSea integration. Reproduce supported real signed offers on a pinned Ethereum mainnet fork. Check order types, criteria, zones, approvals, royalties, net proceeds and actual calldata.
-5. Protect the seller first: exact NFT and proceeds recipient, authenticated price curve, minimum net proceeds, replay and cancellation protection, atomic settlement, explicit fees, and no permission to extract other user assets.
-6. Make ordinary decisions yourself. For consequential choices select a simple reversible approach, record options, rationale, evidence and implications in `docs/DECISIONS.md`, add to Owner Review, and keep working. Don't pause for repeated permission requests.
-7. Revise the spec when a real constraint invalidates an assumption. Simplify the product instead of accumulating adapters and fallback layers to preserve optional ideas.
-8. Test adversarially, use independent security review agents where useful, fix findings, and maintain real evidence and unresolved limitations in the repository.
-9. Keep `docs/STATUS.md` accurate; make small local commits; document exact commands, tests, gas and economic assumptions, and next actions so another session can continue.
-10. Research, code, simulate and prepare deployment locally. No real asset transactions, mainnet deployment, signing with a funded key, paid services, public launch, or remote push without the owner's explicit permission.
+## Rules for changes
 
-## Definition of done
+1. Keep the core small and asset-agnostic. If an application seems to need a core change, first try to express it as a handler or an external contract, and record the outcome in `docs/DECISIONS.md`.
+2. No `delegatecall` beyond the clone's own call into the fixed implementation, and no fees, owner roles, registries, signature validation, initializers or upgrade paths in the core without a recorded decision and owner review. `Order` must never contain `DELEGATECALL` or `SELFDESTRUCT` (`test_implementationCannotBeReplaced`).
+3. Handlers follow the rules in the README: act only through `Order(msg.sender).execute`, take only from `caller`, never forward arbitrary calldata from input, key state by `msg.sender`, verify receipt by state, and offer owner maintenance of active orders only as an explicit, narrow fill. Never add an owner bypass of the active-order rule to the core.
+4. Every change to authority, settlement or money handling needs a focused test, including a hostile case. Fix the design rather than the test when a test exposes a problem.
+5. Keep `docs/STATUS.md` accurate: what was run, the result, and what remains unverified. Never call the contracts safe or audited.
+6. No mainnet deployment, funded signing, real-asset transactions or paid services without the owner's explicit approval.
 
-A usable app and runnable keeper, reproducible mainnet fork tests of actual integrations, documented contract permissions and security properties, operations and deployment instructions, deployment scripts in dry run mode, verified economic feasibility bounds, and a precise residual risk list. Never label the system safe or audited based solely on passing unit tests.
+## Commands
 
-If an API key, RPC or service blocks a test, implement all independent paths and document the exact blocker and reproduction procedure. Don't fabricate evidence or quietly replace real integration tests with mocks.
+```bash
+forge build
+forge test --match-path test/<File>.t.sol        # per change
+CANDIDATE_RUN=1 forge test                       # whole suite, once per release candidate
+forge test --match-path test/Gas.t.sol --isolate # updates snapshots/GasTest.json
+script/demo.sh                                   # all four examples on a throwaway anvil
+forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co  # simulation only
+```
 
-At natural milestones report concisely what is implemented, what passed, assumptions that changed, and decisions the owner may want to review.
+Tests must use `skip()` or absolute `vm.warp` values: with via-IR, `block.timestamp` may be cached within a test function, so `vm.warp(block.timestamp + n)` twice does not advance twice. Foundry clears transient storage between top-level calls in a test, so anything relying on it within one transaction (a fill, a `FillVerifier` snapshot and check) must run inside a single external call.

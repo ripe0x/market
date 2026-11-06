@@ -1,0 +1,25 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      # Same Foundry release the evidence in docs/STATUS.md was produced with.
+      - uses: foundry-rs/foundry-toolchain@v1.9.1
+        with:
+          version: v1.8.1
+
+      - run: forge build --sizes
+      - run: forge test
