@@ -22,4 +22,18 @@ jobs:
           version: v1.8.1
 
       - run: forge build --sizes
-      - run: forge test
+      - run: forge test --no-match-path "test/fork/*"
+
+  # Mainnet fork tests against real collections, pinned to one block, through a public RPC.
+  fork:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1.9.1
+        with:
+          version: v1.8.1
+      - run: forge test --match-path "test/fork/*"
+        env:
+          MAINNET_RPC_URL: https://mainnet.gateway.tenderly.co
