@@ -49,12 +49,12 @@ On a chain where `Market` and `FillVerifier` already exist (Sepolia today), the 
 | [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol) | From one account: a test ERC2981 collection, a fixed-price sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice and topped up, and the PaintAction example. `recover(address)` then cancels the bid and withdraws what it holds | Only with `--broadcast`; about 0.012 ETH plus gas |
 | [`script/rehearse.sh`](../script/rehearse.sh) | Runs Deploy, examples, Lifecycle and recover on a throwaway anvil fork (Sepolia by default; pass a mainnet RPC for mainnet) from anvil's unlocked account | Only to the local fork |
 
-Signing: use a Foundry keystore (`--account <name>`), a hardware wallet (`--ledger`) or another signer flag, belonging to this project. Never put a private key in a command, file or environment variable that is logged.
+Deploy only from an up-to-date `main` checkout, with the owner's Foundry keystore `ripe0x` (`--account ripe0x`; `cast wallet address --account ripe0x` prints its address for `--sender`). Use Tenderly's public gateways: `https://sepolia.gateway.tenderly.co` and `https://mainnet.gateway.tenderly.co`. Every broadcast needs the owner's confirmation immediately before it, after a dry run from the same signer; read back the receipt and state before the next one. Never put a private key in a command, file or environment variable.
 
 ## Simulate
 
 ```bash
-forge script script/Deploy.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com
+forge script script/Deploy.s.sol --rpc-url https://sepolia.gateway.tenderly.co
 ```
 
 ```bash
@@ -73,26 +73,26 @@ script/rehearse.sh https://mainnet.gateway.tenderly.co
 
 ## Sepolia
 
-Prerequisites: a keystore for this project whose account holds at least 0.05 Sepolia ETH, and `ETHERSCAN_API_KEY` for Etherscan verification (Etherscan's v2 key works for Sepolia).
+Prerequisites: a `main` checkout (`git checkout main && git pull --ff-only`), the `ripe0x` keystore holding at least 0.05 Sepolia ETH, and `ETHERSCAN_API_KEY` for Etherscan verification (Etherscan's v2 key works for Sepolia).
 
 1. Deploy and verify the supported release (Market and FillVerifier are skipped where they exist), then the example:
 
    ```bash
-   forge script script/Deploy.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --verify --slow --gas-estimate-multiplier 1500
+   forge script script/Deploy.s.sol --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --verify --slow --gas-estimate-multiplier 1500
    ```
 
    ```bash
-   forge script script/Deploy.s.sol --sig "examples()" --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --verify --slow --gas-estimate-multiplier 1500
+   forge script script/Deploy.s.sol --sig "examples()" --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --verify --slow --gas-estimate-multiplier 1500
    ```
 
 2. Run the lifecycle with real transactions, then cancel the bid it prints:
 
    ```bash
-   forge script script/Lifecycle.s.sol --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --slow --gas-estimate-multiplier 1500
+   forge script script/Lifecycle.s.sol --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --slow --gas-estimate-multiplier 1500
    ```
 
    ```bash
-   forge script script/Lifecycle.s.sol --sig "recover(address)" <bid order> --rpc-url https://ethereum-sepolia-rpc.publicnode.com --account <keystore> --broadcast --gas-estimate-multiplier 1500
+   forge script script/Lifecycle.s.sol --sig "recover(address)" <bid order> --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --gas-estimate-multiplier 1500
    ```
 
 3. Record chain ID, addresses, transaction hashes (in `broadcast/*/11155111/run-latest.json`) and explorer links under "Deployment record".
@@ -132,7 +132,7 @@ Mainnet deployment needs the owner's explicit approval after every item is satis
 
 ### Sepolia, 2026-11-06 (earlier candidate, PR #4 before the simplification review)
 
-Signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`. This account is not recorded in this repository or in any local keystore's address field, and it had sent about 5,800 transactions before; the owner should confirm whose it is. These transactions were missing from the documentation until 2026-11-10, which then said nothing had been broadcast. Transaction data read from Sepolia on 2026-11-10.
+Signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, the owner's account (confirmed by the owner on 2026-11-10). It is not recorded in any local keystore's address field. These transactions were missing from the documentation until 2026-11-10, which then said nothing had been broadcast. Transaction data read from Sepolia on 2026-11-10.
 
 | Block | Nonce | Transaction | Result | Gas used | Contract deployed |
 | --- | --- | --- | --- | --- | --- |
