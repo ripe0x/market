@@ -1,0 +1,18 @@
+{
+  "bid fill: Azuki (ERC721A), no royalty": "132592",
+  "bid fill: BAYC, no royalty": "187306",
+  "bid fill: Chimpers, 5.5% to contract": "174491",
+  "bid fill: Opepen, 2.5% to EOA": "165447",
+  "close: sale": "47129",
+  "create: funded bid": "95618",
+  "create: sale": "95227",
+  "deposit: Azuki into sale": "67026",
+  "deposit: BAYC into sale": "110187",
+  "recover: ETH from closed bid": "34685",
+  "recover: NFT from closed sale": "54705",
+  "sale fill: Azuki (ERC721A), no royalty": "165277",
+  "sale fill: BAYC, no royalty": "219670",
+  "sale fill: Chimpers, 5.5% to contract": "212366",
+  "sale fill: Moonbirds, 1% to EOA": "185595",
+  "sale fill: Opepen, 2.5% to EOA": "190122"
+}

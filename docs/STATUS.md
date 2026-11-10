@@ -1,75 +1,67 @@
 # Status
 
-Updated 2026-11-05. Branch `feat/execution-protocol-v1`.
+Updated 2026-11-10. Branch `feat/nft-trading` (PR #3).
 
 ## State
 
-Exploratory implementation, complete for the first milestone: the core, four examples, a fifth minimal order type, an optional fill verifier, tests, local demo and dry-run deployment. On 2026-11-05 orders became ERC-1167 clones after owner review (DECISIONS D004). In a second review the same day, Policy was renamed OrderHandler (D017) and active orders were committed to their handler: while an order is active only its handler can make it act, and only during a fill; the owner can close it and act only after closing (D003). **Not audited, not deployed.** No mainnet transaction, funded signing or paid service has been used.
+Experimental. The core was merged to `main` on 2026-11-06 (PR #2). This branch adds the NFT trading handlers and, after a simplification review on 2026-11-10, cuts the repository down to the supported release (DECISIONS D301 to D304). **Not audited. Not deployed to mainnet.** No mainnet transaction, funded signing or paid service has been used.
 
-| Area | State |
-| --- | --- |
-| Core (`src/`) | Implemented: `Market`, `Order` (clone implementation), `IOrderHandler` |
-| Periphery (`periphery/`) | Implemented: `FillVerifier`, optional |
-| Example 1, NFT sale (`DutchAuction`) | Implemented and tested |
-| Example 2, ERC20 exchange (`TokenExchange`) | Implemented and tested |
-| Example 3, artwork action (`PaintAction`, `Artwork`) | Implemented and tested |
-| Example 4, persistent bid (`AcquisitionBid`, strategies, `CapitalPool`) | Implemented and tested; price 0 refused |
-| New order type without core change (`BellHandler`) | Test only |
-| Owner maintenance through a handler (`RestockableSale`) | Test only (`test/SharedHandler.t.sol`) |
-| Composition (sale matched into bid) | Test only (`Matcher` in `test/Compose.t.sol`) |
-| Filler-side receipt checks | Contract fillers (`test/Compose.t.sol`); EIP-7702 delegated EOA with a generic batch executor and `FillVerifier` (`test/Eip7702Filler.t.sol`) |
-| Local demo | `script/demo.sh` runs all four examples on anvil, including closing and recovering an exchange's unsold inventory |
-| CI | `.github/workflows/test.yml`: `forge build --sizes` and `forge test` on pull requests and pushes to `main`, Foundry v1.8.1 |
-| Deployment | `script/Deploy.s.sol` simulated locally and against mainnet RPC; never broadcast |
-| Frontend, indexer, keeper | Not built (out of scope for this milestone) |
+| Contract | Kind | State |
+| --- | --- | --- |
+| `Market`, `Order` (`src/`) | Core | Unchanged since PR #2 |
+| `NFTSale`, `NFTBid`, `NFTTrade`, `HandlerBase` (`handlers/`) | Supported NFT trading | Unit, fuzz, invariant, composition and mainnet fork tested. Both handlers authenticate their caller (S1, D302) |
+| `FillVerifier` (`periphery/`) | Optional periphery | Unchanged |
+| `PaintAction`, `Artwork` (`examples/`) | Example, not supported for value | Unit tested; pays one payee (D303) |
+| `DutchAuction`, `TokenExchange`, `AcquisitionBid`, strategies, `CapitalPool`, demo script | Removed (D301) | History at commit `4598764` |
 
 ## Evidence
 
-Candidate: code at commit `dd71a9e`; the commit after it adds only comments, documentation and the third review's PoC tests, and the full suite was rerun on it. Coverage, the compiler matrix and the deploy dry run ran on `dd71a9e`. Toolchain: forge 1.8.1 (`982849d`), solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run 2026-11-05.
+Candidate: production code at commit `33a5c6d` (the next commit adds two `NFTBid` tests and this file). Toolchain: forge 1.8.1 (`982849d`), solc 0.8.30, EVM Prague, via-IR, 200 optimizer runs. Run 2026-11-10.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Full suite | `CANDIDATE_RUN=1 forge test` | Exit 0. 148 passed, 0 failed, 16 suites. Fuzz tests 1,000 runs each. (142 passed, 15 suites, on `dd71a9e` before the third review's PoC file.) |
-| Invariants | (in the full suite) `test/Invariant.t.sol` | 5 invariants, 128 runs x 64 calls = 8,192 calls, 0 reverts. In the final campaign: 906 attacker calls and 904 owner attempts to take from active orders, none succeeded. |
+| Full suite | `CANDIDATE_RUN=1 forge test` | Exit 0. 167 passed, 0 failed, 19 suites, including the 14 mainnet fork tests. Fuzz 1,000 runs each. `test/NFTBid.t.sol` then 18 passed with the two added tests. |
+| Invariants | `test/Invariant.t.sol` in the full suite | 6 invariants, 128 runs x 64 calls, 0 reverts. About 930 attacker calls and 914 owner attempts on active orders per campaign, none succeeded. |
+| Deep invariants | `FOUNDRY_INVARIANT_RUNS=1000 FOUNDRY_INVARIANT_DEPTH=128 forge test --match-path test/Invariant.t.sol` | All 6 hold, 128,000 calls, 0 reverts. |
+| Mainnet fork | `forge test --match-path "test/fork/*"` | 14 passed at block 26,357,000 (BAYC, Azuki, Moonbirds, Opepen, Chimpers, ENS, CryptoPunks); gas in `snapshots/NFTFork.json`. |
 | Gas | `forge test --match-path test/Gas.t.sol --isolate` | `snapshots/GasTest.json`, table below. |
-| Coverage | `CANDIDATE_RUN=1 forge coverage --ir-minimum --report summary --no-match-coverage 'test\|script\|lib'` | `src/`, `periphery/` and `examples/`: 93.0% lines (213/229), 92.6% statements (274/296), 84.8% branches (39/46), 98.0% functions. `Market`, `Order` and `FillVerifier` branches 100%; their uncovered lines are inline assembly, which `--ir-minimum` coverage does not attribute. Approximate. |
-| Sizes | `forge build --sizes` | `Order` implementation 2,133 bytes runtime, `Market` 1,277, `FillVerifier` 1,058; each order clone 149 bytes; largest example `Artwork` 3,813. |
-| Compiler and EVM | `forge build --use <solc> --evm-version <evm> src periphery examples` | Compiles with solc 0.8.28 and 0.8.30, each for Cancun and Prague. `forge test --use 0.8.28 --evm-version cancun --match-path "test/{Core,Clone,Compose,SharedHandler}.t.sol"`: 51 passed. |
-| Local demo | `script/demo.sh` | All four examples executed on a throwaway anvil node (chain 31337): "ONCHAIN EXECUTION COMPLETE & SUCCESSFUL". The exchange step tops up an active order, then closes it and recovers the unsold 50 GIVE. |
-| Deploy dry run | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` | Simulation only, nothing broadcast. Estimated 4,655,610 gas for Market (with the implementation), `FillVerifier` and six example contracts. Market's CREATE2 address would be `0x8210144750E6237740bf71b819f87A834905445d`, the implementation `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87`. |
-| Independent review | AI agent on `dd71a9e` | No critical, high, medium or low findings; four informational notes (H1 to H4), documented. PoC tests `test/review/LifecycleReviewPoC.t.sol`, 6 passed. See SECURITY.md, third review. |
+| Coverage | `CANDIDATE_RUN=1 forge coverage --ir-minimum --report summary --no-match-coverage 'test\|script\|lib' --no-match-path "test/fork/*"` | 90.1% lines (181/201), 90.5% statements, 90.7% branches (39/43), 100% functions over `src/`, `handlers/`, `periphery/`, `examples/`. Uncovered lines are mostly inline assembly, which `--ir-minimum` does not attribute. Approximate. |
+| Sizes | `forge build --sizes` | Runtime bytes: `Order` 2,133, `Market` 1,277, `NFTSale` 3,183, `NFTBid` 3,424, `FillVerifier` 1,058, `PaintAction` 1,168, `Artwork` 3,813. Each order clone 149. |
+| Compiler and EVM | `forge build --use 0.8.28 --evm-version cancun src handlers periphery examples` | Compiles. |
+| Static analysis | Slither 0.11.5, 101 detectors, `src/`, `handlers/`, `periphery/`, `examples/` compiled together | 21 results, none actionable. Triage below. |
+| Independent review | AI agent on `69f2455` | Nothing above informational; 9 PoC tests, all refusals (SECURITY.md, fifth review). |
+| S1 regression | `forge test --match-path test/review/SaleEventPoC.t.sol` | 2 passed; both emitted a false `Sold` before the fix. |
 
-Tests per suite: Core 32, Clone 10, SharedHandler 5, FillVerifier 10, Eip7702Filler 4, DutchAuction 14, TokenExchange 13, PaintAction 11, AcquisitionBid 20, Compose 4, NewOrderType 1, Gas 6, Invariant 1 (5 invariants), first review PoC 5, second review PoC 6, third review PoC 6.
+Slither triage. `arbitrary-send-eth` (`Order.execute`): authorized by the lifecycle rules. `arbitrary-send-erc20` (`NFTBid._transfer`): `from` is the authenticated filler. `locked-ether` (`Market`): `create` forwards its ETH into the new order. `reentrancy-no-eth`, `reentrancy-events` (`Order.fill`, both handlers): reentry into the same order is refused by `filling`; events after calls only affect log order. `timestamp`: price schedules are time based by design. `missing-zero-check` (`execute` target): the caller's choice. `assembly`, `low-level-calls`: reviewed (`_arg`, `_isOrder`, `execute`'s revert bubbling, `FillVerifier`'s transient storage).
 
 ### Gas
 
-Whole-transaction gas from isolated runs, including the 21,000 base cost and calldata. "Before" is the clone design before the lifecycle change (`4a15d12`); the full-contract column is the design before clones (`c8bad35`). D004 in DECISIONS.md also lists a storage-initialized clone.
+Whole-transaction gas, isolated runs, local mocks (`snapshots/GasTest.json`). Real collections: [NFT_TRADING.md](NFT_TRADING.md#gas).
 
-| Operation | Now | Before (clone) | Full contract |
-| --- | --- | --- | --- |
-| Create an order (any handler) | 93,973 to 96,890 | 93,973 to 96,890 | 482,124 to 485,024 |
-| Fill: DutchAuction, 1 payee, with refund, closes | 122,214 | 122,360 | 117,189 |
-| Fill: DutchAuction, 2 payees | 150,754 | 150,900 | 145,717 |
-| Fill: TokenExchange, first partial / repeat | 114,634 / 80,434 | 114,664 / 80,464 | 110,522 / 76,322 |
-| Fill: PaintAction, paint + resign + close | 111,432 | 111,578 | 106,416 |
-| Fill: AcquisitionBid, own funds / drawing from pool | 132,738 / 110,535 | 132,768 / 110,580 | 128,637 / 105,713 |
-| Owner closes | 47,129 | 46,994 | 44,173 |
-| Owner withdraws an NFT (after closing) | 64,080 | 61,966 | 59,073 |
+| Operation | Gas |
+| --- | --- |
+| Create: NFTSale order | 95,143 |
+| Create: NFTBid order, funded | 95,534 |
+| Fill: NFTSale, fixed price, no royalty, exact payment | 121,094 |
+| Fill: NFTSale, falling price, royalty, refund | 173,042 |
+| Fill: NFTBid, rising collection bid, royalty | 164,840 |
+| Fill: NFTBid, last fill closes | 124,749 |
+| Fill: PaintAction, paint + resign + close | 109,600 |
+| Owner closes | 47,129 |
+| Owner withdraws an NFT after closing | 64,080 |
 
-The lifecycle change costs nothing on fills (30 to 146 gas cheaper, from function dispatch after the rename and `close` no longer reading the owner during a fill). Owner recovery costs 2,114 more because `execute` reads the cold `closed` flag, and closing 135 more because it reads `filling` first. Fills that pay an address for the first time include 25,000 gas for creating that account; first writes to a storage slot cost 20,000, which is why closing costs about 22,000. At a 0.1 gwei base fee, creating an order costs about 0.00001 ETH.
+The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on the fork.
 
 ## Not verified
 
-1. No fork tests against real mainnet tokens, NFT collections or artworks. All tests use local contracts, including deliberately hostile ones.
-2. No human audit. Three independent AI reviews (see SECURITY.md).
-3. EIP-7702 fillers are tested only in Foundry's local EVM (`test/Eip7702Filler.t.sol`), with a stand-in batch executor, not with real wallet software. `FillVerifier` gas inside a real batch was not measured.
-4. The full suite has run only on Solidity 0.8.30 with via-IR for Prague; on 0.8.28 for Cancun only the Core, Clone, Compose and SharedHandler suites.
-5. Gas figures are local measurements under Prague rules; real costs depend on calldata size, warm or cold accounts and gas price.
-6. Block explorer display and verification of clone orders has not been checked.
-7. Owner maintenance through a handler is shown with a test-only handler; none of the four examples offers it.
+1. No human audit. AI reviews and Slither only (SECURITY.md).
+2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
+3. Gas figures are local and fork measurements; real costs depend on calldata, warm or cold accounts and gas price.
+4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
+5. Deployment, Sepolia and explorer verification: PR #4.
 
 ## Next actions
 
-1. Owner review of the items in DECISIONS.md, Owner review (license holder, cheap sales restarting the rising bid, the core's OpenZeppelin `Clones` import, setup and maintenance of active orders going through handlers).
-2. If the primitive holds up, fork tests with real assets (a mainnet ERC721 and USDC or USDT through `TokenExchange`), then an independent audit before any deployment that holds value.
-3. A minimal read-only page or script that lists orders from `Market.Created` and decodes known handlers, if useful for experiments.
+1. Owner decisions in DECISIONS.md, Owner review (items 1, 3, 4, 7, 8 open).
+2. PR #4: reduced deployment script, Sepolia, release checklist.
+3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.

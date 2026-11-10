@@ -2,296 +2,279 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
-import {HandlerBase} from "../examples/HandlerBase.sol";
-import {DutchAuction} from "../examples/DutchAuction.sol";
-import {TokenExchange} from "../examples/TokenExchange.sol";
-import {AcquisitionBid, ICapitalSource, IBidStrategy} from "../examples/AcquisitionBid.sol";
-import {RisingStrategy} from "../examples/BidStrategies.sol";
-import {CapitalPool} from "../examples/CapitalPool.sol";
-import {TestNFT, TestToken} from "./utils/Mocks.sol";
+import {NFTBid} from "../handlers/NFTBid.sol";
+import {NFTSale} from "../handlers/NFTSale.sol";
+import {NFTTrade} from "../handlers/NFTTrade.sol";
+import {RoyaltyNFT} from "./utils/Mocks.sol";
 
-/// Drives several unrelated orders, their counterparties and an attacker through random
-/// sequences, and keeps ghost accounting of every legitimate movement.
+/// Random listings, purchases, sales into a persistent bid, cancellations, top-ups, time and
+/// theft attempts against both NFT handlers, with ghost accounting of every payment.
 contract Driver is Test {
     Market public market = new Market();
-    DutchAuction public dutch = new DutchAuction();
-    TokenExchange public exchange = new TokenExchange();
-    AcquisitionBid public acquisition = new AcquisitionBid();
-    TestNFT public nft = new TestNFT();
-    TestToken public give = new TestToken("GIVE");
-    TestToken public take = new TestToken("TAKE");
-    CapitalPool public pool;
+    NFTSale public sale = new NFTSale(market);
+    NFTBid public bids = new NFTBid(market);
+    RoyaltyNFT public art = new RoyaltyNFT();
 
-    address public attacker = makeAddr("attacker");
-    address public taker = makeAddr("taker");
-    address public payee = makeAddr("payee");
-    address public holder = makeAddr("holder");
+    uint256 public constant TOKENS = 12;
+    uint256 public constant MAX_FILLS = 4;
+    address[2] public holders = [makeAddr("holder0"), makeAddr("holder1")];
+    address public buyer = makeAddr("buyer");
+    address public bidder = makeAddr("bidder");
     address public vault = makeAddr("vault");
-    address public funder = makeAddr("funder");
-    address public operator = makeAddr("operator");
+    address public royaltyTo = makeAddr("royaltyTo");
+    address public attacker = makeAddr("attacker");
 
-    // Two sales by different sellers.
-    Order[2] public sales;
-    bytes[2] public saleConfigs;
-    address[2] public sellers = [makeAddr("seller0"), makeAddr("seller1")];
-    address[2] public buyers = [makeAddr("buyer0"), makeAddr("buyer1")];
-    uint8[2] public saleState; // 0 open, 1 sold, 2 recovered
-    uint256[2] public salePrice;
+    struct Listing {
+        Order order;
+        bytes config;
+        uint256 tokenId;
+        address seller;
+        bool done;
+    }
 
-    Order public ex;
-    bytes public exConfig;
-    uint256 public deposited;
-    uint256 public given;
-    uint256 public owedSum;
-
+    Listing[] public listings;
     Order public bid;
     bytes public bidConfig;
-    uint256 public bidFunded;
-    uint256 public poolFunded;
-    uint256 public paidToHolder;
-    uint256 public acquired;
-    uint256 public nextToken = 100;
+    bool public bidRecovered;
 
-    bool public attackSucceeded;
+    // Ghost accounting.
+    uint256 public royaltiesOwed;
+    mapping(address => uint256) public proceedsOwed;
+    uint256 public bidIn; // funding and top-ups
+    uint256 public bidOut; // prices paid
+    uint256 public bought;
     uint256 public attacks;
+    bool public attackSucceeded;
     bool public ownerBypassed;
 
     constructor() {
-        vm.warp(1_000_000);
-        for (uint256 i; i < 2; ++i) {
-            nft.mint(sellers[i], i);
-            HandlerBase.Payee[] memory p = new HandlerBase.Payee[](1);
-            p[0] = HandlerBase.Payee(sellers[i], 10_000);
-            saleConfigs[i] = abi.encode(
-                DutchAuction.Config(nft, i, 5 ether, 1 ether, block.timestamp, block.timestamp + 10_000, p)
-            );
-            vm.prank(sellers[i]);
-            sales[i] = market.create(dutch, saleConfigs[i], 0);
-            vm.prank(sellers[i]);
-            nft.transferFrom(sellers[i], address(sales[i]), i);
-            vm.deal(buyers[i], 1000 ether);
+        art.setRoyalty(royaltyTo, 500);
+        for (uint256 i; i < TOKENS; ++i) {
+            address h = holders[i % 2];
+            art.mint(h, i);
         }
-
-        exConfig = abi.encode(TokenExchange.Config(give, take, 1, 2, payee, type(uint256).max));
-        vm.prank(operator);
-        ex = market.create(exchange, exConfig, 0);
-        deposited = 1000e18;
-        give.mint(address(ex), deposited);
-        take.mint(taker, type(uint128).max);
-        vm.prank(taker);
-        take.approve(address(ex), type(uint256).max);
-
-        pool = new CapitalPool(funder);
+        for (uint256 i; i < 2; ++i) {
+            vm.prank(holders[i]);
+            art.setApprovalForAll(address(bids), true);
+        }
+        vm.deal(buyer, 1e30);
+        vm.deal(bidder, 1e30);
+        vm.deal(attacker, 1 ether);
         bidConfig = abi.encode(
-            AcquisitionBid.Config(
-                nft,
-                vault,
-                3 ether,
-                new RisingStrategy(),
-                abi.encode(RisingStrategy.Params(0.5 ether, block.timestamp, 0.0001 ether, 8000)),
-                pool
+            NFTBid.Config(
+                art, true, 0, NFTTrade.Schedule(0.5 ether, 3 ether, block.timestamp, block.timestamp + 1 days, 0), vault, MAX_FILLS
             )
         );
-        vm.deal(operator, 1 ether);
-        vm.prank(operator);
-        bid = market.create{value: 1 ether}(acquisition, bidConfig, 0);
-        bidFunded = 1 ether;
-        vm.deal(address(pool), 20 ether);
-        poolFunded = 20 ether;
-        vm.prank(funder);
-        pool.setGrant(address(bid), 0.0005 ether, 2 ether);
-
-        vm.deal(attacker, 100 ether);
+        vm.prank(bidder);
+        bid = market.create{value: 4 ether}(bids, bidConfig, 0);
+        bidIn = 4 ether;
     }
 
-    function wait(uint32 dt) external {
-        skip(bound(dt, 1, 2 days));
+    function listingCount() external view returns (uint256) {
+        return listings.length;
     }
 
-    function buySale(uint256 i, uint96 extra) external {
-        i = bound(i, 0, 1);
-        if (saleState[i] != 0) return;
-        uint256 p = dutch.price(abi.decode(saleConfigs[i], (DutchAuction.Config)), block.timestamp);
-        uint256 sellerBefore = sellers[i].balance;
-        vm.prank(buyers[i]);
-        sales[i].fill{value: p + bound(extra, 0, 1 ether)}(saleConfigs[i], abi.encode(buyers[i]));
-        assertEq(sellers[i].balance - sellerBefore, p);
-        (saleState[i], salePrice[i]) = (1, p);
-    }
-
-    function recoverSale(uint256 i) external {
-        i = bound(i, 0, 1);
-        if (saleState[i] != 0) return;
-        vm.startPrank(sellers[i]);
-        sales[i].close();
-        sales[i].execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(sales[i]), sellers[i], i)));
+    function list(uint256 tokenSeed, uint256 start, uint256 end, uint256 duration) external {
+        uint256 id = tokenSeed % TOKENS;
+        address seller = art.ownerOf(id);
+        if (seller != holders[0] && seller != holders[1]) return;
+        start = bound(start, 0, 10 ether);
+        end = bound(end, 0, 10 ether);
+        duration = bound(duration, 0, 2 days);
+        bytes memory config = abi.encode(
+            NFTSale.Config(art, id, NFTTrade.Schedule(start, end, block.timestamp, block.timestamp + duration, 0), seller, 10_000)
+        );
+        vm.startPrank(seller);
+        Order order = market.create(sale, config, bytes32(listings.length));
+        art.transferFrom(seller, address(order), id);
         vm.stopPrank();
-        saleState[i] = 2;
+        listings.push(Listing(order, config, id, seller, false));
     }
 
-    function fillExchange(uint256 amount) external {
-        uint256 left = give.balanceOf(address(ex));
-        if (left == 0) return;
-        amount = bound(amount, 1, left);
-        vm.prank(taker);
-        uint256 owed = abi.decode(ex.fill(exConfig, abi.encode(amount, taker)), (uint256));
-        assertEq(owed, amount * 2);
-        given += amount;
-        owedSum += owed;
+    function buy(uint256 index, uint256 extra) external {
+        if (listings.length == 0) return;
+        Listing storage l = listings[index % listings.length];
+        if (l.done) return;
+        (uint256 price,, uint256 r) = sale.quote(abi.decode(l.config, (NFTSale.Config)));
+        extra = bound(extra, 0, 1 ether);
+        uint256 before = buyer.balance;
+        vm.prank(buyer);
+        l.order.fill{value: price + extra}(l.config, abi.encode(buyer, price));
+        assertEq(before - buyer.balance, price, "buyer pays the price");
+        l.done = true;
+        royaltiesOwed += r;
+        proceedsOwed[l.seller] += price - r;
     }
 
-    function topUpExchange(uint96 amount) external {
-        give.mint(address(ex), amount);
-        deposited += amount;
-    }
-
-    function sellToBid(uint256 fraction) external {
-        uint256 current = acquisition.currentBid(address(bid), abi.decode(bidConfig, (AcquisitionBid.Config)));
-        uint256 price = current * bound(fraction, 0, 10_000) / 10_000;
-        if (price == 0) return; // the bid refuses gifts; see test_zeroPriceSaleRejected
-        uint256 id = nextToken++;
-        nft.mint(holder, id);
-        uint256 before = holder.balance;
-        vm.startPrank(holder);
-        nft.approve(address(bid), id);
-        bid.fill(bidConfig, abi.encode(id, price));
+    function cancel(uint256 index) external {
+        if (listings.length == 0) return;
+        Listing storage l = listings[index % listings.length];
+        if (l.done) return;
+        vm.startPrank(l.seller);
+        l.order.close();
+        l.order.execute(address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(l.order), l.seller, l.tokenId)));
         vm.stopPrank();
-        assertLe(price, 3 ether);
-        assertEq(holder.balance - before, price);
-        assertEq(nft.ownerOf(id), vault);
-        paidToHolder += price;
-        acquired += 1;
+        l.done = true;
     }
 
-    function fundBid(uint96 amount, bool viaPool) external {
-        amount = uint96(bound(amount, 0, 5 ether));
-        if (viaPool) {
-            vm.deal(address(pool), address(pool).balance + amount);
-            poolFunded += amount;
-        } else {
-            vm.deal(address(bid), address(bid).balance + amount);
-            bidFunded += amount;
+    function sellIntoBid(uint256 tokenSeed) external {
+        if (bid.closed()) return;
+        uint256 id = tokenSeed % TOKENS;
+        address seller = art.ownerOf(id);
+        if (seller != holders[0] && seller != holders[1]) return;
+        NFTBid.Config memory c = abi.decode(bidConfig, (NFTBid.Config));
+        uint256 price = bids.priceAt(c.schedule, block.timestamp);
+        if (address(bid).balance < price) return;
+        (, , uint256 r) = bids.quote(address(bid), c, id);
+        vm.prank(seller);
+        bid.fill(bidConfig, abi.encode(id, price - r, seller));
+        royaltiesOwed += r;
+        proceedsOwed[seller] += price - r;
+        bidOut += price;
+        bought += 1;
+    }
+
+    function topUp(uint256 amount) external {
+        if (bid.closed()) return;
+        amount = bound(amount, 0, 5 ether);
+        vm.prank(buyer);
+        (bool ok,) = address(bid).call{value: amount}("");
+        require(ok);
+        bidIn += amount;
+    }
+
+    function cancelBid() external {
+        if (bidRecovered) return;
+        vm.startPrank(bidder);
+        if (!bid.closed()) bid.close();
+        bid.execute(bidder, address(bid).balance, "");
+        vm.stopPrank();
+        bidRecovered = true;
+    }
+
+    /// An owner tries to take what its active order holds without closing it. Only fills can.
+    function ownerTakesFromActive(uint256 index) external {
+        (Order order, address owner, address target, uint256 value, bytes memory data) = (bid, bidder, bidder, 1, "");
+        if (listings.length != 0 && index % 2 == 0) {
+            Listing storage l = listings[index % listings.length];
+            (order, owner, target, value) = (l.order, l.seller, address(art), 0);
+            data = abi.encodeCall(IERC721.transferFrom, (address(l.order), l.seller, l.tokenId));
         }
-    }
-
-    /// An owner tries to take something its active order holds, without closing it. Any
-    /// success is recorded.
-    function ownerTakesFromActive(uint256 which) external {
-        Order[4] memory orders = [sales[0], sales[1], ex, bid];
-        address[4] memory owners = [sellers[0], sellers[1], operator, operator];
-        uint256 w = bound(which, 0, 3);
-        if (orders[w].closed()) return;
-        (address target, uint256 value, bytes memory data) = w < 2
-            ? (address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(orders[w]), owners[w], w)))
-            : w == 2 ? (address(give), 0, abi.encodeCall(IERC20.transfer, (owners[w], 1))) : (owners[w], 1, bytes(""));
-        vm.prank(owners[w]);
-        (bool ok,) = address(orders[w]).call(abi.encodeCall(Order.execute, (target, value, data)));
+        if (order.closed()) return;
+        vm.prank(owner);
+        (bool ok,) = address(order).call(abi.encodeCall(Order.execute, (target, value, data)));
         if (ok) ownerBypassed = true;
     }
 
-    /// The attacker tries every authority it does not have. Any success is recorded.
-    function attack(uint256 kind, uint256 which, uint256 id, bytes calldata junk) external {
-        Order[4] memory orders = [sales[0], sales[1], ex, bid];
-        Order target = orders[bound(which, 0, 3)];
-        attacks++;
-        vm.startPrank(attacker);
+    function wait(uint256 s) external {
+        vm.warp(block.timestamp + bound(s, 0, 1 days));
+    }
+
+    /// Every way an outsider or the bidder might take a holder's token or anyone's ETH.
+    function attack(uint256 tokenSeed, uint8 kind) external {
+        uint256 id = tokenSeed % TOKENS;
+        address victim = art.ownerOf(id);
+        attacks += 1;
         bool ok;
-        uint256 k = bound(kind, 0, 6);
-        if (k == 0) {
-            (ok,) = address(target).call(abi.encodeCall(Order.execute, (attacker, address(target).balance, "")));
-        } else if (k == 1) {
-            (ok,) = address(target).call(
-                abi.encodeCall(
-                    Order.execute,
-                    (address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(target), attacker, id % 2)))
-                )
+        kind %= 5;
+        if (kind == 0) {
+            vm.prank(attacker);
+            (ok,) = address(bids).call(abi.encodeCall(IOrderHandler.onFill, (victim, 0, bidConfig, abi.encode(id, 0, attacker))));
+        } else if (kind == 1) {
+            vm.prank(attacker);
+            (ok,) = address(bid).call(abi.encodeCall(Order.fill, (bidConfig, abi.encode(id, 0, attacker))));
+        } else if (kind == 2) {
+            // The bidder, once closed, tries to use the holders' approvals through the order.
+            if (!bid.closed()) return;
+            vm.prank(bidder);
+            (ok,) = address(bid).call(
+                abi.encodeCall(Order.execute, (address(art), 0, abi.encodeCall(IERC721.transferFrom, (victim, bidder, id))))
             );
-        } else if (k == 2) {
-            (ok,) = address(target).call(abi.encodeCall(Order.close, ()));
-        } else if (k == 3) {
-            (ok,) = address(target).call(abi.encodeCall(Order.fill, (junk, junk)));
-        } else if (k == 4) {
-            (ok,) = address(pool).call(abi.encodeCall(ICapitalSource.draw, (bound(id, 1, 1 ether))));
-        } else if (k == 5) {
-            // Call a handler directly, as if the attacker were the order.
-            (ok,) = address(target.handler()).call(
-                abi.encodeCall(IOrderHandler.onFill, (attacker, 0, target == ex ? exConfig : bidConfig, junk))
-            );
+            if (!ok) {
+                vm.prank(bidder);
+                (ok,) = address(bid).call(
+                    abi.encodeCall(
+                        Order.execute,
+                        (address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (victim, 0, bidConfig, abi.encode(id, 0, bidder))))
+                    )
+                );
+            }
+        } else if (kind == 3) {
+            if (listings.length == 0) return;
+            Listing storage l = listings[id % listings.length];
+            vm.prank(attacker);
+            (ok,) = address(sale).call(abi.encodeCall(IOrderHandler.onFill, (attacker, 0, l.config, abi.encode(attacker, 0))));
+            if (!ok) {
+                vm.prank(attacker);
+                (ok,) = address(l.order).call(
+                    abi.encodeCall(Order.execute, (address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(l.order), attacker, l.tokenId))))
+                );
+            }
         } else {
-            // Spend someone else's approval through an order they approved.
-            (ok,) = address(ex).call(abi.encodeCall(Order.fill, (exConfig, abi.encode(uint256(1), attacker))));
+            vm.prank(attacker);
+            (ok,) = address(art).call(abi.encodeCall(IERC721.transferFrom, (victim, attacker, id)));
         }
-        vm.stopPrank();
         if (ok) attackSucceeded = true;
     }
 }
 
 contract InvariantTest is Test {
-    Driver h;
+    Driver d;
 
     function setUp() public {
-        h = new Driver();
-        targetContract(address(h));
+        vm.warp(1_000_000);
+        d = new Driver();
+        targetContract(address(d));
     }
 
-    function invariant_attackerGainsNothing() public view {
-        assertFalse(h.attackSucceeded());
-        assertEq(h.attacker().balance, 100 ether);
-        assertEq(h.nft().balanceOf(h.attacker()), 0);
-        assertEq(h.give().balanceOf(h.attacker()), 0);
+    function invariant_noTheft() public view {
+        assertFalse(d.attackSucceeded());
+        assertEq(d.attacker().balance, 1 ether);
+        assertEq(d.art().balanceOf(d.attacker()), 0);
+        assertEq(d.art().balanceOf(d.bidder()), 0, "the bidder only ever withdraws ETH");
     }
 
-    /// No owner moved anything out of an active order: only fills can.
+    /// No owner moved anything out of an active order.
     function invariant_activeOrdersStayCommitted() public view {
-        assertFalse(h.ownerBypassed());
+        assertFalse(d.ownerBypassed());
     }
 
-    /// Each sale's NFT is where its history says: in the order, with its buyer (who paid at
-    /// least the floor), or back with its seller. Sold and recovered orders are closed.
-    function invariant_saleCustody() public view {
+    function invariant_handlersHoldNothing() public view {
+        assertEq(address(d.sale()).balance, 0);
+        assertEq(address(d.bids()).balance, 0);
+        assertEq(d.art().balanceOf(address(d.sale())), 0);
+        assertEq(d.art().balanceOf(address(d.bids())), 0);
+    }
+
+    function invariant_everyPaymentAccounted() public view {
+        assertEq(d.royaltyTo().balance, d.royaltiesOwed(), "royalties");
         for (uint256 i; i < 2; ++i) {
-            address holderNow = h.nft().ownerOf(i);
-            uint8 s = h.saleState(i);
-            Order sale = h.sales(i);
-            if (s == 0) {
-                assertEq(holderNow, address(sale));
-                assertFalse(sale.closed());
-            } else if (s == 1) {
-                assertEq(holderNow, h.buyers(i));
-                assertGe(h.salePrice(i), 1 ether);
-                assertTrue(sale.closed());
-            } else {
-                assertEq(holderNow, h.sellers(i));
-                assertTrue(sale.closed());
-            }
-            assertEq(address(sale).balance, 0);
+            address h = d.holders(i);
+            assertEq(h.balance, d.proceedsOwed(h), "seller proceeds");
         }
+        if (!d.bidRecovered()) assertEq(address(d.bid()).balance, d.bidIn() - d.bidOut(), "bid escrow");
+        else assertEq(address(d.bid()).balance, 0);
     }
 
-    /// Every GIVE the exchange released was paid for at its rate, to its payee, by its taker.
-    function invariant_exchangeConservation() public view {
-        IERC20 give = h.give();
-        assertEq(give.balanceOf(address(h.ex())) + h.given(), h.deposited());
-        assertEq(give.balanceOf(h.taker()), h.given());
-        assertEq(h.take().balanceOf(h.payee()), h.owedSum());
-        assertEq(h.owedSum(), h.given() * 2);
+    function invariant_bidLimits() public view {
+        assertLe(d.bought(), d.MAX_FILLS());
+        assertEq(d.art().balanceOf(d.vault()), d.bought(), "one token per paid fill");
+        assertEq(d.bids().fills(address(d.bid())), d.bought());
+        if (d.bought() == d.MAX_FILLS()) assertTrue(d.bid().closed());
     }
 
-    /// Every wei the bid paid came from its own funds or its pool grant, and it holds one NFT
-    /// for every acquisition.
-    function invariant_bidAccounting() public view {
-        Order bid = h.bid();
-        CapitalPool pool = h.pool();
-        uint256 spentFromOrder = h.bidFunded() - address(bid).balance;
-        uint256 drawn = h.poolFunded() - address(pool).balance;
-        assertEq(spentFromOrder + drawn, h.paidToHolder());
-        (,, uint64 count) = h.acquisition().state(address(bid));
-        assertEq(count, h.acquired());
-        assertEq(h.nft().balanceOf(h.vault()), h.acquired());
-        assertFalse(bid.closed());
+    function invariant_tokensAreSomewhereLegitimate() public view {
+        uint256 open;
+        for (uint256 i; i < d.listingCount(); ++i) {
+            (Order order,,,, bool done) = d.listings(i);
+            if (!done) open += 1;
+            else assertEq(d.art().balanceOf(address(order)), 0, "finished listings hold nothing");
+        }
+        uint256 total = d.art().balanceOf(d.holders(0)) + d.art().balanceOf(d.holders(1))
+            + d.art().balanceOf(d.buyer()) + d.art().balanceOf(d.vault()) + open;
+        assertEq(total, d.TOKENS());
     }
 }

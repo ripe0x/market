@@ -5,6 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import {IOrderHandler, Order} from "../../src/Order.sol";
 
 contract TestNFT is ERC721 {
@@ -226,3 +227,45 @@ contract Reenterer {
 
 /// Rejects ETH.
 contract Rejecter {}
+
+/// ERC721 with a settable ERC2981 royalty, reported through ERC165.
+contract RoyaltyNFT is ERC721, ERC2981 {
+    constructor() ERC721("Royalty", "RYL") {}
+
+    function mint(address to, uint256 id) external {
+        _mint(to, id);
+    }
+
+    function setRoyalty(address receiver, uint96 bps) external {
+        _setDefaultRoyalty(receiver, bps);
+    }
+
+    function supportsInterface(bytes4 id) public view override(ERC721, ERC2981) returns (bool) {
+        return super.supportsInterface(id);
+    }
+}
+
+/// Reports ERC2981 but answers whatever the test scripts, or reverts.
+contract ScriptedRoyaltyNFT is TestNFT {
+    address public receiver;
+    uint256 public amount;
+    bool public broken;
+
+    function script(address receiver_, uint256 amount_, bool broken_) external {
+        (receiver, amount, broken) = (receiver_, amount_, broken_);
+    }
+
+    function royaltyInfo(uint256, uint256) external view returns (address, uint256) {
+        require(!broken, "royalty broken");
+        return (receiver, amount);
+    }
+
+    function supportsInterface(bytes4 id) public view override returns (bool) {
+        return id == 0x2a55205a || super.supportsInterface(id);
+    }
+}
+
+/// Claims transfers succeed but moves nothing.
+contract LyingNFT is TestNFT {
+    function transferFrom(address, address, uint256) public pure override {}
+}
