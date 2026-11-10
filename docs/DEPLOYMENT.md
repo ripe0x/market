@@ -132,7 +132,7 @@ Mainnet deployment needs the owner's explicit approval after every item is satis
 
 ### Sepolia, 2026-11-06 (earlier candidate, PR #4 before the simplification review)
 
-Signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`. This account is not recorded in this repository or in any local keystore's address field, and it had sent about 5,800 transactions before; the owner should confirm whose it is. These transactions were missing from the documentation until 2026-11-10, which then said nothing had been broadcast. Transaction data read from Sepolia on 2026-11-10.
+Signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, the owner's account (confirmed by the owner on 2026-11-10). It is not recorded in any local keystore's address field. These transactions were missing from the documentation until 2026-11-10, which then said nothing had been broadcast. Transaction data read from Sepolia on 2026-11-10.
 
 | Block | Nonce | Transaction | Result | Gas used | Contract deployed |
 | --- | --- | --- | --- | --- | --- |

@@ -6,7 +6,7 @@ Updated 2026-11-10. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR
 
 Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
 
-**Sepolia:** on 2026-11-06 an earlier candidate was broadcast to Sepolia by account `0xCB43…17F9`: one transaction reverted out of gas, then ten deployments succeeded. Of those, `Market`, the `Order` implementation and `FillVerifier` are identical to this release and verified on Sourcify; the rest are obsolete. Earlier documentation said nothing had been broadcast; that was wrong. Full record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record). This release's `NFTSale` and `NFTBid` are not deployed anywhere, because no funded signer for this project was available.
+**Sepolia:** on 2026-11-06 an earlier candidate was broadcast to Sepolia by the owner's account `0xCB43…17F9`: one transaction reverted out of gas, then ten deployments succeeded. Of those, `Market`, the `Order` implementation and `FillVerifier` are identical to this release and verified on Sourcify; the rest are obsolete. Earlier documentation said nothing had been broadcast; that was wrong. Full record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record). This release's `NFTSale` and `NFTBid` are not deployed anywhere, because no funded signer for this project was available.
 
 | Contract | Kind | State |
 | --- | --- | --- |
@@ -65,7 +65,6 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 3. Gas figures are local and fork measurements; real costs depend on calldata, warm or cold accounts and gas price.
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
 5. This release's `NFTSale`, `NFTBid` and `PaintAction` have no public-chain deployment, no Etherscan verification and no lifecycle executed with real transactions.
-6. Who controls the 2026-11-06 Sepolia signer `0xCB43…17F9`.
 
 ## Next actions
 
