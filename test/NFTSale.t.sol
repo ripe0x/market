@@ -9,14 +9,12 @@ import {Base} from "./utils/Base.sol";
 import {Reenterer, Rejecter, RoyaltyNFT, ScriptedRoyaltyNFT, LyingNFT} from "./utils/Mocks.sol";
 
 contract NFTSaleTest is Base {
-    NFTSale sale;
     RoyaltyNFT art;
     address proceeds = makeAddr("proceeds");
     address recipient = makeAddr("recipient");
 
     function setUp() public override {
         super.setUp();
-        sale = new NFTSale();
         art = new RoyaltyNFT();
         art.setRoyalty(royalty, 500); // 5%
     }
@@ -295,7 +293,7 @@ contract NFTSaleTest is Base {
     function test_directHandlerCallMovesNothing() public {
         (Order order, bytes memory config) = _list(_schedule(1 ether, 1 ether, 0, 0), 1000);
         vm.prank(attacker);
-        vm.expectRevert(); // the attacker is not an order: `execute` does not exist
+        vm.expectRevert(NFTTrade.NotAFill.selector); // the attacker is not an order
         sale.onFill(attacker, 1 ether, config, abi.encode(attacker, 1 ether));
         assertEq(art.ownerOf(1), address(order));
     }

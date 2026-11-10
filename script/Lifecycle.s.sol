@@ -7,7 +7,6 @@ import {Order} from "../src/Order.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {NFTSale} from "../handlers/NFTSale.sol";
 import {NFTTrade} from "../handlers/NFTTrade.sol";
-import {HandlerBase} from "../handlers/HandlerBase.sol";
 import {Artwork} from "../examples/Artwork.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
 import {RoyaltyNFT} from "../test/utils/Mocks.sol";
@@ -15,7 +14,7 @@ import {Addresses} from "./Deploy.s.sol";
 
 /// @notice Exercises the deployed protocol end to end with real transactions from one account,
 /// which plays every role: seller, buyer, bidder, holder and artist. Run after
-/// `script/Deploy.s.sol` on the same chain. Spends about 0.012 ETH plus gas; 0.0006 ETH of it
+/// `script/Deploy.s.sol` and its `examples()` on the same chain. Spends about 0.012 ETH plus gas; 0.0006 ETH of it
 /// goes to the fixed royalty and vault addresses below, which nobody controls.
 ///
 ///   forge script script/Lifecycle.s.sol --rpc-url <rpc> --broadcast <signer>
@@ -38,7 +37,7 @@ contract Lifecycle is Addresses {
     RoyaltyNFT nft;
 
     function run() external {
-        require(address(market()).code.length != 0, "run script/Deploy.s.sol first");
+        require(address(paintAction()).code.length != 0, "run script/Deploy.s.sol and its examples() first");
         me = msg.sender;
         salt = uint256(keccak256(abi.encode(block.chainid, block.timestamp, me)));
         vm.startBroadcast();
@@ -113,9 +112,7 @@ contract Lifecycle is Addresses {
     function paint() internal {
         Artwork art = new Artwork();
         art.mint(me, 1);
-        HandlerBase.Payee[] memory payees = new HandlerBase.Payee[](1);
-        payees[0] = HandlerBase.Payee(me, 10_000);
-        bytes memory config = abi.encode(PaintAction.Config(art, 1, 0x0e, 0.001 ether, payees)); // colors 1 to 3
+        bytes memory config = abi.encode(PaintAction.Config(art, 1, 0x0e, 0.001 ether, me)); // colors 1 to 3
         Order order = market().create(paintAction(), config, bytes32(++salt));
         art.setPainter(1, address(order));
         order.fill{value: 0.001 ether}(config, abi.encode(uint8(2)));

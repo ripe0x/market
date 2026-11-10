@@ -6,7 +6,7 @@
 
 | Contract | Role |
 | --- | --- |
-| [`handlers/NFTTrade.sol`](../handlers/NFTTrade.sol) | Shared base: price schedule, ERC2981 royalty lookup, delivery check |
+| [`handlers/NFTTrade.sol`](../handlers/NFTTrade.sol) | Shared base: fill authentication, price schedule, ERC2981 royalty lookup, delivery check |
 | [`handlers/NFTSale.sol`](../handlers/NFTSale.sol) | A listing. The order escrows one ERC721 and sells it for ETH |
 | [`handlers/NFTBid.sol`](../handlers/NFTBid.sol) | A funded bid. The order escrows ETH and buys one token, or up to `maxFills` tokens of a collection |
 | [`handlers/HandlerBase.sol`](../handlers/HandlerBase.sol) | Helpers every handler here uses: `_exec`, `_sendETH`, `_close` |
@@ -63,7 +63,7 @@ Rounding: the movement between the end points rounds down, so the price is never
 
 **Input** (`abi.encode(address recipient, uint256 maxPrice)`): `recipient` receives the token; the fill reverts if the current price is above `maxPrice`. Send at least the price as ETH; the excess returns to the caller.
 
-**Fill**, in order: check config and window, compute price and royalty, check `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
+**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill (`NotAFill`), check config and window, compute price and royalty, check `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
 
 **Lifecycle:**
 
@@ -99,20 +99,31 @@ The order holds no approvals, so nothing remains to revoke after a sale or cance
 2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty)`; `order.fill(config, abi.encode(tokenId, price - royalty, me))`.
 3. Cancel: `order.close()`, then `order.execute(bidder, address(order).balance, "")`.
 
+### Both handlers act only inside a genuine fill
+
+Anyone can call a handler's `onFill` directly, posing as an order with any `caller`, `value` and `config`, and the owner of a closed order can make the order call it outside a fill. Both handlers therefore start with `_requireFill`, which accepts only these at once:
+
+1. `msg.sender`'s code is the 149-byte ERC-1167 clone of Market's `Order` implementation, so it runs `Order` and reports the true caller of `fill` and the ETH sent.
+2. That order's handler is this contract.
+3. That order is filling.
+
+For `NFTBid` this protects the approvals it holds. For `NFTSale` it protects the meaning of `Sold`: before the check, a counterfeit order could make the real handler announce a 1,000 ETH sale of a real token with no ETH paid and no royalty (finding S1, `test/review/SaleEventPoC.t.sol`). Indexers should still read events only from the handler addresses they trust, and treat each event as describing one fill of the order named in it. A genuine `Sold` means the price was really paid and split as stated; it does not mean the parties are independent (a seller can buy its own listing) or that the collection is the one you expect (read `nft` from the order's config). A clone of the implementation deployed without Market still runs `Order`'s code and is accepted (`test_cloneOutsideMarketIsStillAnHonestOrder`); its terms are whatever its deployer appended.
+
 ### Why the bid handler holds the approval
 
-An order's owner can close it at any moment and then make any call as the order. An approval to a bid's order is therefore an approval to the bidder: the bidder can watch for a holder's `approve(order, id)`, close the order and call `transferFrom(holder, bidder, id)` through it before the holder's fill lands. `test_approvalToOrderIsStealableInTheExample` shows this against the `AcquisitionBid` example; it applies to any handler that pulls a filler's assets under an approval to the order.
+An order's owner can close it at any moment and then make any call as the order. An approval to a bid's order is therefore an approval to the bidder: the bidder can watch for a holder's `approve(order, id)`, close the order and call `transferFrom(holder, bidder, id)` through it before the holder's fill lands (finding A1, `test_approvalToAnOrderBelongsToItsOwner`). This applies to any handler that pulls a filler's assets under an approval to the order.
 
-`NFTBid` instead takes the approval itself. It has no owner and fixed code, and moves a token only when all of these hold:
+`NFTBid` instead takes the approval itself. It has no owner and fixed code, and moves a token only inside a genuine fill (above), from `caller`, the account that called `fill`, to the order's `recipient`, for the order's current price. So a token moves only when its holder fills a bid themself. A direct call, a fake order, a genuine order bound to another handler, and a closed order's owner are all refused (`test_bidderCannotStealApprovedTokens`, `test_otherOrdersCannotUseTheHandlersApproval`, the invariant campaign's theft attempts). A clone of the implementation deployed without Market still runs `Order`'s code and is as safe to accept (`test_cloneOutsideMarketIsStillAnHonestOrder`).
 
-1. `msg.sender`'s code is the 149-byte ERC-1167 clone of Market's `Order` implementation, so it runs `Order` and reports the true caller of `fill`.
-2. That order's handler is this `NFTBid`.
-3. That order is filling.
-4. The token moves from `caller`, the account that called `fill`, to the order's `recipient`, for the order's price.
+### What an approval to NFTBid authorizes
 
-So a token moves only when its holder fills a bid themself. A direct call, a fake order, a genuine order bound to another handler, and a closed order's owner are all refused (`test_bidderCannotStealApprovedTokens`, `test_otherOrdersCannotUseTheHandlersApproval`, the invariant campaign's theft attempts). A clone of the implementation deployed without Market still runs `Order`'s code and is as safe to accept (`test_cloneOutsideMarketIsStillAnHonestOrder`).
+The approval is held by the one `NFTBid` deployment and shared by every bid on it, from every bidder. Unlike authority held by an order, it is not isolated per order. Precisely, it lets `NFTBid` move a token of yours only in a genuine fill of an `NFTBid` order in which **your account is the caller of `fill`**: the token id your fill names, to that order's `recipient`, for that order's current price, with at least your `minProceeds` (net of royalty) sent to the `proceedsTo` your fill names.
 
-An approval also lets a phishing interface get a holder to sign a fill that pays an attacker's `proceedsTo`, one token per signed transaction (review N2); read what you sign. The cost is the usual cost of an operator approval: a bug in `NFTBid` would expose every token approved to it. Approve one token rather than the collection when you can, and revoke when done.
+What follows:
+
+1. **Whoever can make your account call `fill` can sell your approved tokens**, into any bid, at any price, with proceeds anywhere. That includes your key, a phishing interface you sign for (one token per signed fill, review N2), a smart-wallet module or session key, an EIP-7702 delegate, and any contract holder that lets others trigger arbitrary calls. A router or other intermediary cannot: when it calls `fill`, it is the caller, so only its own tokens move (`test_phishingRouterCannotSweepApprovedTokens`).
+2. **A defect in `NFTBid` exposes every token approved to it**, across all holders and collections. This is the usual cost of an operator approval and the main reason the handler is small, ownerless and pinned by code hash.
+3. **Approvals outlive the fill.** `setApprovalForAll` also covers tokens you acquire later. Approve one token when you can, approve and fill in one batch if your wallet allows, and revoke when done.
 
 ## Security assumptions
 
@@ -124,7 +135,7 @@ An approval also lets a phishing interface get a holder to sign a fill that pays
 6. **Stale quotes.** Prices move with time and royalties can change between a quote and inclusion. `maxPrice` (sales) and `minProceeds` (bids) bound what the filler accepts.
 7. **Collection bids pay for any token.** Sellers will offer the least valuable eligible token. Use `anyToken = false` or another handler for narrower criteria.
 8. **MEV.** Fills are first come, first served. A falling listing or rising bid that crosses another venue's price will be taken by whoever sees it first.
-9. **Market binding.** `NFTBid` recognizes orders of the Market it was deployed with. Deploy one `NFTBid` per Market.
+9. **Market binding.** Both handlers recognize orders of the Market they were deployed with. Deploy one of each per Market.
 
 ## Compatibility
 
@@ -154,8 +165,8 @@ Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/
 | Create a listing | 95,227 |
 | Deposit the token into the listing | 67,026 (Azuki) to 110,187 (BAYC) |
 | Create a funded bid | 95,618 |
-| Sale fill, no royalty | 162,746 (Azuki) to 217,139 (BAYC) |
-| Sale fill with royalty | 183,065 (Moonbirds 1%) to 209,836 (Chimpers 5.5%, splitter) |
+| Sale fill, no royalty | 165,277 (Azuki) to 219,670 (BAYC) |
+| Sale fill with royalty | 185,595 (Moonbirds 1%) to 212,366 (Chimpers 5.5%, splitter) |
 | Bid fill, no royalty | 132,592 (Azuki) to 187,306 (BAYC) |
 | Bid fill with royalty | 165,447 (Opepen 2.5%) to 174,491 (Chimpers) |
 | Close | 47,129 |
@@ -173,7 +184,7 @@ Seaport 1.6 fills of single orders sent directly to Seaport in mainnet blocks 26
 
 What the numbers mean:
 
-1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: a bit above its most efficient basic path, near the median of advanced orders. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), and the `ownerOf` delivery checks.
+1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: a bit above its most efficient basic path, near the median of advanced orders. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, and the genuine-fill check (about 2,500).
 2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (95,227) plus a transaction moving the token into escrow (67,026 to 110,187), about 162,000 to 205,000 in all; a Market bid costs one create with its ETH (95,618). At 1 gwei that is about 0.0001 to 0.0002 ETH per order.
 3. **What the gas buys.** The order exists onchain with its funds or token escrowed, so it needs no offchain order book, cannot be filled after it is unfunded or the token has moved elsewhere, and can be discovered from `Market.Created` events alone. Seaport's offers are cheaper to place and can be over-subscribed against one WETH balance; a Market bid escrows exactly what it can spend.
 4. **Escrow tradeoff.** A listed NFT is in its order, not the seller's wallet. Other marketplaces will not show it as the seller's, and it cannot be listed elsewhere at the same time.

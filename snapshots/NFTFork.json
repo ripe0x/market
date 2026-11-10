@@ -10,9 +10,9 @@
   "deposit: BAYC into sale": "110187",
   "recover: ETH from closed bid": "34685",
   "recover: NFT from closed sale": "54705",
-  "sale fill: Azuki (ERC721A), no royalty": "162746",
-  "sale fill: BAYC, no royalty": "217139",
-  "sale fill: Chimpers, 5.5% to contract": "209836",
-  "sale fill: Moonbirds, 1% to EOA": "183065",
-  "sale fill: Opepen, 2.5% to EOA": "187592"
+  "sale fill: Azuki (ERC721A), no royalty": "165277",
+  "sale fill: BAYC, no royalty": "219670",
+  "sale fill: Chimpers, 5.5% to contract": "212366",
+  "sale fill: Moonbirds, 1% to EOA": "185595",
+  "sale fill: Opepen, 2.5% to EOA": "190122"
 }

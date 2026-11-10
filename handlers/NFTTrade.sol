@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {Market} from "../src/Market.sol";
+import {Order} from "../src/Order.sol";
 import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title NFTTrade
@@ -16,6 +18,9 @@ import {HandlerBase} from "./HandlerBase.sol";
 ///   reports it but reverts, asks more than `price`, names no receiver, or whose receiver refuses
 ///   ETH makes the fill revert: a royalty is never skipped.
 /// - `proceeds = price - royalty` goes to the seller.
+///
+/// Both handlers act only inside a genuine fill (`_requireFill`), so their `Sold` and `Bought`
+/// events always describe a settlement that happened.
 abstract contract NFTTrade is HandlerBase {
     /// @notice A price that moves linearly from `startPrice` at `startTime` to `endPrice` at
     /// `endTime` and then stays at `endPrice`. Equal prices give a fixed price; a lower
@@ -34,6 +39,42 @@ abstract contract NFTTrade is HandlerBase {
     error ZeroAddress();
     error BadRoyalty(address receiver, uint256 royalty, uint256 price);
     error NotDelivered();
+    error NotAFill();
+
+    /// @dev Hash of the 45 byte ERC-1167 proxy code delegating to Market's order implementation.
+    /// Any account whose code starts with it runs `Order`, whoever deployed it, so its `fill`
+    /// reports the true caller and value.
+    bytes32 private immutable proxyHash;
+    /// @dev Proxy code plus the 104 bytes of arguments `Market` appends.
+    uint256 private constant CLONE_SIZE = 149;
+
+    constructor(Market market) {
+        proxyHash = keccak256(
+            abi.encodePacked(hex"363d3d373d3d3d363d73", market.implementation(), hex"5af43d82803e903d91602b57fd5bf3")
+        );
+    }
+
+    /// @dev Revert unless `msg.sender` is an order bound to this handler, inside its own fill.
+    /// Anyone can call `onFill` directly, with any `caller`, `value` and `config`, and an owner
+    /// can make its closed order call it outside a fill. Only a genuine fill vouches that
+    /// `caller` called, `value` was paid and `config` is the order's.
+    function _requireFill() internal view {
+        Order order = Order(payable(msg.sender));
+        if (!_isOrder(msg.sender) || address(order.handler()) != address(this) || !order.filling()) {
+            revert NotAFill();
+        }
+    }
+
+    function _isOrder(address account) private view returns (bool) {
+        if (account.code.length != CLONE_SIZE) return false;
+        bytes32 h;
+        assembly ("memory-safe") {
+            let p := mload(0x40)
+            extcodecopy(account, p, 0, 45)
+            h := keccak256(p, 45)
+        }
+        return h == proxyHash;
+    }
 
     /// @notice The price at the current block, or a revert outside the schedule's window.
     function _currentPrice(Schedule memory s) internal view returns (uint256) {

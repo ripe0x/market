@@ -9,7 +9,6 @@ import {Base} from "./utils/Base.sol";
 contract PaintActionTest is Base {
     Artwork art;
     address artist = makeAddr("artist");
-    address gallery = makeAddr("gallery");
     uint256 constant ID = 7;
     uint256 constant ALLOWED = (1 << 3) | (1 << 9) | (1 << 200);
 
@@ -21,10 +20,10 @@ contract PaintActionTest is Base {
         art.mint(artist, ID);
     }
 
-    /// The artist offers one repaint for 0.5 ETH, 10% to a gallery, and lends the order the
+    /// The artist offers one repaint for 0.5 ETH and lends the order the
     /// painter role. Returns the order and its config.
     function _offer() internal returns (Order order, bytes memory config) {
-        config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, _payees(gallery, 1000, artist)));
+        config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, artist));
         order = _create(artist, paint, config);
         vm.prank(artist);
         art.setPainter(ID, address(order));
@@ -37,8 +36,7 @@ contract PaintActionTest is Base {
 
         assertEq(art.colorOf(ID), 9);
         assertEq(art.ownerOf(ID), artist); // the buyer bought an action, not the token
-        assertEq(artist.balance, 0.45 ether);
-        assertEq(gallery.balance, 0.05 ether);
+        assertEq(artist.balance, 0.5 ether);
         assertEq(buyer.balance, 100 ether - 0.5 ether);
         assertEq(address(order).balance, 0);
     }
@@ -90,7 +88,7 @@ contract PaintActionTest is Base {
     /// The artwork's own rules decide: an order the owner never named as painter cannot paint,
     /// and the buyer's ETH stays with the buyer.
     function test_noAuthorityNoAction() public {
-        bytes memory config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, _payees(artist)));
+        bytes memory config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, artist));
         Order order = _create(artist, paint, config);
         vm.prank(buyer);
         vm.expectRevert(Artwork.NotAllowed.selector);
@@ -100,7 +98,7 @@ contract PaintActionTest is Base {
 
     /// Someone other than the token's owner cannot create a working offer for it.
     function test_nonOwnerCannotSellTheAction() public {
-        bytes memory config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, _payees(attacker)));
+        bytes memory config = abi.encode(PaintAction.Config(art, ID, ALLOWED, 0.5 ether, attacker));
         Order order = _create(attacker, paint, config);
         vm.prank(attacker);
         vm.expectRevert(Artwork.NotAllowed.selector);
@@ -154,7 +152,7 @@ contract PaintActionTest is Base {
         vm.prank(artist);
         art.mint(artist, 8);
         (Order a, bytes memory ca) = _offer();
-        bytes memory cb = abi.encode(PaintAction.Config(art, 8, ALLOWED, 1 ether, _payees(artist)));
+        bytes memory cb = abi.encode(PaintAction.Config(art, 8, ALLOWED, 1 ether, artist));
         Order b = _create(artist, paint, cb);
         vm.prank(artist);
         art.setPainter(8, address(b));

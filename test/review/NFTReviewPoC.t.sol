@@ -49,7 +49,6 @@ contract ReentrantNFT is TestNFT {
 /// attack path is safely refused (or that a suspected issue has no effect). No finding above
 /// informational was reproduced.
 contract NFTReviewPoC is Base {
-    NFTBid bids;
     RoyaltyNFT art;
     address bidder = makeAddr("bidder");
     address vault = makeAddr("vault");
@@ -57,7 +56,6 @@ contract NFTReviewPoC is Base {
 
     function setUp() public override {
         super.setUp();
-        bids = new NFTBid(market);
         art = new RoyaltyNFT();
         art.setRoyalty(royalty, 500);
         for (uint256 i = 1; i <= 5; ++i) {
@@ -96,7 +94,7 @@ contract NFTReviewPoC is Base {
         // Attacker (owner) closes it and tries to drive onFill naming the holder as caller.
         vm.startPrank(attacker);
         clone.close();
-        vm.expectRevert(NFTBid.NotAFill.selector);
+        vm.expectRevert(NFTTrade.NotAFill.selector);
         clone.execute(address(bids), 0, abi.encodeCall(IOrderHandler.onFill, (holder, 0, config, abi.encode(1, 0, attacker))));
         vm.stopPrank();
 
@@ -167,7 +165,7 @@ contract NFTReviewPoC is Base {
     // underflow. Shown here for completeness.
     // -------------------------------------------------------------------------------------------
     function test_info_maxRoyaltyBpsAboveDenominatorIsHarmless() public {
-        NFTSale saleH = new NFTSale();
+        NFTSale saleH = new NFTSale(market);
         RoyaltyNFT c = new RoyaltyNFT();
         c.setRoyalty(royalty, 10_000); // 100% royalty, the maximum royaltyOf allows
         c.mint(seller, 1);

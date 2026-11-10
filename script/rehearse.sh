@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rehearses a deployment on a throwaway anvil fork: runs script/Deploy.s.sol and then
+# Rehearses a deployment on a throwaway anvil fork: runs script/Deploy.s.sol (supported
+# contracts, then the PaintAction example) and then
 # script/Lifecycle.s.sol exactly as a real deployment would, from anvil's unlocked default
 # account, then stops the fork. Nothing reaches the forked chain.
 # Usage: script/rehearse.sh [fork-rpc-url] [port]
@@ -20,6 +21,7 @@ echo "Forked chain $(cast chain-id --rpc-url "$RPC") at block $(cast block-numbe
 
 ARGS=(--rpc-url "$RPC" --broadcast --unlocked --sender "$SENDER" --slow)
 forge script script/Deploy.s.sol "${ARGS[@]}"
+forge script script/Deploy.s.sol --sig "examples()" "${ARGS[@]}"
 OUT=$(forge script script/Lifecycle.s.sol "${ARGS[@]}" | tee /dev/stderr)
 BID=$(grep -o 'recover with 0x[0-9a-fA-F]*' <<<"$OUT" | awk '{print $3}')
 forge script script/Lifecycle.s.sol --sig "recover(address)" "$BID" "${ARGS[@]}"

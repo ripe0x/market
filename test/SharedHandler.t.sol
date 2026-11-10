@@ -4,8 +4,9 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
-import {AcquisitionBid} from "../examples/AcquisitionBid.sol";
-import {DutchAuction} from "../examples/DutchAuction.sol";
+import {NFTBid} from "../handlers/NFTBid.sol";
+import {NFTSale} from "../handlers/NFTSale.sol";
+import {NFTTrade} from "../handlers/NFTTrade.sol";
 import {Base} from "./utils/Base.sol";
 import {Reenterer, ScriptHandler, TestToken} from "./utils/Mocks.sol";
 
@@ -50,19 +51,13 @@ contract SharedHandlerTest is Base {
     /// Two sales on one handler, by different owners with different terms, are separate
     /// accounts: separate NFTs, balances, permissions and lifecycles.
     function test_ordersSharingAHandlerAreIndependent() public {
-        (Order a, bytes memory configA) = _listDutch(seller, 1);
-        nft.mint(other, 2);
-        DutchAuction.Config memory cb = _dutchConfig(2, other);
-        (cb.startPrice, cb.endPrice) = (3 ether, 3 ether);
-        bytes memory configB = abi.encode(cb);
-        Order b = _create(other, dutch, configB);
-        vm.prank(other);
-        nft.safeTransferFrom(other, address(b), 2);
+        (Order a, bytes memory configA) = _listSale(seller, 1, 10 ether);
+        (Order b, bytes memory configB) = _listSale(other, 2, 3 ether);
         assertEq(address(a.handler()), address(b.handler()));
 
         vm.prank(buyer);
         vm.expectRevert(Order.WrongConfig.selector);
-        b.fill{value: 10 ether}(configA, abi.encode(buyer));
+        b.fill{value: 10 ether}(configA, abi.encode(buyer, 10 ether));
 
         // A's owner has no power over B, and closing A leaves B active.
         vm.startPrank(seller);
@@ -76,7 +71,7 @@ contract SharedHandlerTest is Base {
         assertFalse(b.closed());
 
         vm.prank(buyer);
-        b.fill{value: 3 ether}(configB, abi.encode(buyer));
+        b.fill{value: 3 ether}(configB, abi.encode(buyer, 3 ether));
         assertEq(nft.ownerOf(2), buyer);
         assertEq(other.balance, 3 ether);
         assertEq(nft.ownerOf(1), address(a));
@@ -95,19 +90,21 @@ contract SharedHandlerTest is Base {
         vm.expectRevert(Order.Unauthorized.selector);
         mine.fill("", steal);
 
-        // A sale on DutchAuction refunds its buyer; the buyer's hook fills the attacker's order,
+        // A sale on NFTSale refunds its buyer; the buyer's hook fills the attacker's order,
         // whose script tries to take ETH the sale holds while the sale is still filling.
-        (Order sale, bytes memory saleConfig) = _listDutch(seller, 1);
-        vm.deal(address(sale), 5 ether);
+        (Order saleOrder, bytes memory saleConfig) = _listSale(seller, 1, 10 ether);
+        vm.deal(address(saleOrder), 5 ether);
         Reenterer buyerContract = new Reenterer();
         vm.deal(address(buyerContract), 11 ether);
         bytes memory grab =
-            script.script(false, address(sale), 0, abi.encodeCall(Order.execute, (attacker, 5 ether, "")));
+            script.script(false, address(saleOrder), 0, abi.encodeCall(Order.execute, (attacker, 5 ether, "")));
         buyerContract.arm(address(mine), abi.encodeCall(Order.fill, ("", grab)));
-        buyerContract.call(address(sale), 11 ether, abi.encodeCall(Order.fill, (saleConfig, abi.encode(buyer))));
+        buyerContract.call(
+            address(saleOrder), 11 ether, abi.encodeCall(Order.fill, (saleConfig, abi.encode(buyer, 10 ether)))
+        );
         assertTrue(buyerContract.attempted());
         assertFalse(buyerContract.succeeded());
-        assertEq(address(sale).balance, 5 ether);
+        assertEq(address(saleOrder).balance, 5 ether);
         assertEq(nft.ownerOf(1), buyer);
         assertEq(attacker.balance, 100 ether);
     }
@@ -161,36 +158,30 @@ contract SharedHandlerTest is Base {
         assertEq(address(b).balance, 1 ether);
     }
 
-    /// One AcquisitionBid handler serves two bids. A seller paid by bid A sells into bid B from
-    /// inside that payment. Each bid's recorded history and funds reflect only its own fill.
+    /// One NFTBid handler serves two bids. A holder paid by bid A sells into bid B from inside
+    /// that payment. Each bid's fill count and funds reflect only its own fill.
     function test_sharedHandlerStateStaysPerOrder() public {
         address vaultA = makeAddr("vaultA");
         address vaultB = makeAddr("vaultB");
-        bytes memory ca = _bidConfig(vaultA, 5 ether, rising, _risingParams(1 ether, 0, 5000), address(0));
-        bytes memory cb = _bidConfig(vaultB, 5 ether, rising, _risingParams(2 ether, 0, 5000), address(0));
+        bytes memory ca = abi.encode(NFTBid.Config(nft, true, 0, _fixed(1 ether), vaultA, 5));
+        bytes memory cb = abi.encode(NFTBid.Config(nft, true, 0, _fixed(2 ether), vaultB, 5));
         vm.deal(seller, 3 ether);
         vm.deal(other, 3 ether);
         vm.prank(seller);
-        Order a = market.create{value: 3 ether}(acquisition, ca, 0);
+        Order a = market.create{value: 3 ether}(bids, ca, 0);
         vm.prank(other);
-        Order b = market.create{value: 3 ether}(acquisition, cb, 0);
+        Order b = market.create{value: 3 ether}(bids, cb, 0);
 
         Reenterer holder = new Reenterer();
         nft.mint(address(holder), 1);
         nft.mint(address(holder), 2);
-        bytes memory approveAll = abi.encodeWithSignature("setApprovalForAll(address,bool)", address(a), true);
-        holder.call(address(nft), 0, approveAll);
-        holder.call(address(nft), 0, abi.encodeWithSignature("setApprovalForAll(address,bool)", address(b), true));
-        holder.arm(address(b), abi.encodeCall(Order.fill, (cb, abi.encode(2, 2 ether))));
-        holder.call(address(a), 0, abi.encodeCall(Order.fill, (ca, abi.encode(1, 1 ether))));
+        holder.call(address(nft), 0, abi.encodeWithSignature("setApprovalForAll(address,bool)", address(bids), true));
+        holder.arm(address(b), abi.encodeCall(Order.fill, (cb, abi.encode(2, 2 ether, address(holder)))));
+        holder.call(address(a), 0, abi.encodeCall(Order.fill, (ca, abi.encode(1, 1 ether, address(holder)))));
         assertTrue(holder.succeeded());
 
-        (uint128 priceA,, uint64 countA) = acquisition.state(address(a));
-        (uint128 priceB,, uint64 countB) = acquisition.state(address(b));
-        assertEq(priceA, 1 ether);
-        assertEq(priceB, 2 ether);
-        assertEq(countA, 1);
-        assertEq(countB, 1);
+        assertEq(bids.fills(address(a)), 1);
+        assertEq(bids.fills(address(b)), 1);
         assertEq(address(a).balance, 2 ether);
         assertEq(address(b).balance, 1 ether);
         assertEq(nft.ownerOf(1), vaultA);

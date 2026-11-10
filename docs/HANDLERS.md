@@ -66,11 +66,11 @@ contract BellHandler is IOrderHandler {
 
 The order has already checked `config` against its commitment and already holds `value`. `msg.sender` is the order (or someone pretending to be one; see rule 1). The full test is [`test/NewOrderType.t.sol`](../test/NewOrderType.t.sol).
 
-Inherit [`handlers/HandlerBase.sol`](../handlers/HandlerBase.sol) for `_exec` (one call as the order), `_sendETH`, `_tokenCall` (ERC20 calls that tolerate missing return values and reject `false`), `_pay` (basis-point split) and `_close`.
+Inherit [`handlers/HandlerBase.sol`](../handlers/HandlerBase.sol) for `_exec` (one call as the order), `_sendETH` and `_close`.
 
 ### Rules
 
-1. **Act only through the calling order.** Hold no assets, approvals or roles in the handler: anyone can call `onFill` directly. Exception: a handler that must pull a filler's assets may hold the filler's approval if it first proves `msg.sender` is a genuine, filling `Order` clone bound to it, as [`NFTBid`](../handlers/NFTBid.sol) does in `_isOrder`.
+1. **Act only through the calling order.** Hold no assets, approvals or roles in the handler: anyone can call `onFill` directly, posing as an order with any `caller`, `value` and `config`. Exception: a handler that must pull a filler's assets may hold the filler's approval if it first proves `msg.sender` is a genuine, filling `Order` clone bound to it, as [`NFTTrade._requireFill`](../handlers/NFTTrade.sol) does for `NFTBid`. Do the same if anyone will read your handler's events as records of settlement (finding S1). Approvals held this way are shared by every order on the handler; say so to the people who grant them.
 2. **Take only from `caller`, never under an approval to the order.** An approval a filler gives the order is also the owner's after closing: the owner can close and spend it before the filler's fill lands (SECURITY.md, A1). Have fillers send ETH with the fill, or approve the handler under rule 1's exception.
 3. **Build every call yourself.** Never pass a target or calldata from `input` to `execute`.
 4. **Use `value` for this fill's ETH**, not the order's balance.
@@ -157,16 +157,16 @@ struct Config {
     uint256 tokenId;
     uint256 allowedColors; // bit i set: color i allowed
     uint256 price;
-    Payee[] payees;
+    address payee;
 }
 // input: abi.encode(uint8 color)
 ```
 
 The lifecycle, with the permission held by the order and granted by an independent contract:
 
-1. The token's owner creates an order: `market.create(paintAction, config, salt)`.
+1. The token's owner creates an order (it must own the order: once closed, an order's permissions are its owner's): `market.create(paintAction, config, salt)`.
 2. The owner grants the permission: `art.setPainter(tokenId, order)`. The order now holds the right to paint, and only the order.
-3. Anyone fills with a color and the price: `order.fill{value: price}(config, abi.encode(color))`. `PaintAction` checks the color and payment, makes the order call `art.paint(tokenId, color)`, then `art.resign(tokenId)` so the permission cannot be used again, pays the payees, refunds the excess and closes the order.
+3. Anyone fills with a color and the price: `order.fill{value: price}(config, abi.encode(color))`. `PaintAction` checks the color and payment, makes the order call `art.paint(tokenId, color)`, then `art.resign(tokenId)` so the permission cannot be used again, pays `payee`, refunds the excess and closes the order.
 4. If nobody buys, the owner closes the order and takes the permission back: `order.close()`, then `order.execute(art, 0, resign(tokenId))`, or simply calls `art.setPainter` again from the token.
 
 Nothing in Market knows what an artwork, a color or a painter is. The same `Market` and `Order` that escrow an NFT for `NFTSale` here hold a role in another contract, and the same lifecycle rules decide who can use it. Tests: [`test/PaintAction.t.sol`](../test/PaintAction.t.sol) (11 tests, including that the role is consumed after one paint, that a transfer of the token makes the offer stale, that closing leaves the role until revoked, and that the creator can revoke without touching the order). Real transactions: the `paint` step of [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol).

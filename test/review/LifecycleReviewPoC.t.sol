@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {Order} from "../../src/Order.sol";
-import {CapitalPool} from "../../examples/CapitalPool.sol";
 import {Base} from "../utils/Base.sol";
 import {Reenterer, ScriptHandler} from "../utils/Mocks.sol";
 
@@ -127,33 +126,51 @@ contract LifecycleReviewPoC is Base {
         Order(payable(eoa)).execute(address(this), 1 ether, "");
     }
 
-    // --- Probe: after closure the owner cannot draw an external grant gated on filling() ---
+    // --- Probe: after closure the owner cannot use an external grant gated on filling() ---
 
-    function test_closedOrderCannotDrawCapitalPool() public {
-        // A bid whose capital source is a pool.
-        CapitalPool pool = new CapitalPool{value: 10 ether}(address(this));
-        bytes memory config = _bidConfig(seller, 5 ether, rising, _risingParams(1 ether, 0, 5000), address(pool));
-        vm.deal(seller, 1 ether);
-        vm.prank(seller);
-        Order bid = market.create{value: 1 ether}(acquisition, config, 0);
-        pool.setGrant(address(bid), 1 ether, 5 ether);
-        skip(10); // 5 ETH accrued and drawable by a filling order
+    function test_closedOrderCannotDrawFillingGatedGrant() public {
+        ScriptHandler script = new ScriptHandler();
+        Order order = _create(seller, script, "");
+        FillingGatedGrant grant = new FillingGatedGrant{value: 10 ether}(address(order));
+        vm.deal(address(order), 1 ether);
+
+        // The handler can draw during a fill.
+        order.fill("", script.script(true, address(grant), 0, abi.encodeCall(FillingGatedGrant.draw, (1 ether))));
+        assertEq(address(order).balance, 2 ether);
 
         // While active, the owner cannot even reach execute.
         vm.prank(seller);
         vm.expectRevert(Order.Unauthorized.selector);
-        bid.execute(address(pool), 0, abi.encodeCall(CapitalPool.draw, (1 ether)));
+        order.execute(address(grant), 0, abi.encodeCall(FillingGatedGrant.draw, (1 ether)));
 
-        // Close, then the owner has execute but the pool refuses a draw outside a fill.
+        // Close, then the owner has execute but the grant refuses a draw outside a fill.
         vm.startPrank(seller);
-        bid.close();
-        vm.expectRevert(CapitalPool.NotFilling.selector);
-        bid.execute(address(pool), 0, abi.encodeCall(CapitalPool.draw, (1 ether)));
+        order.close();
+        vm.expectRevert(FillingGatedGrant.NotFilling.selector);
+        order.execute(address(grant), 0, abi.encodeCall(FillingGatedGrant.draw, (1 ether)));
 
-        // The owner still recovers the order's OWN ETH; the pool's funds stay in the pool.
-        bid.execute(seller, 1 ether, "");
+        // The owner still recovers the order's own ETH; the grant's funds stay put.
+        order.execute(seller, 2 ether, "");
         vm.stopPrank();
-        assertEq(seller.balance, 1 ether);
-        assertEq(address(pool).balance, 10 ether);
+        assertEq(seller.balance, 2 ether);
+        assertEq(address(grant).balance, 9 ether);
+    }
+}
+
+/// Pays one order on request, but only while that order is filling, so only its handler can
+/// spend the grant and its owner cannot, before or after closing.
+contract FillingGatedGrant {
+    address public immutable grantee;
+
+    error NotFilling();
+
+    constructor(address grantee_) payable {
+        grantee = grantee_;
+    }
+
+    function draw(uint256 amount) external {
+        if (msg.sender != grantee || !Order(payable(msg.sender)).filling()) revert NotFilling();
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok);
     }
 }

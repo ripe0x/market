@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {Market} from "../src/Market.sol";
 import {NFTTrade} from "./NFTTrade.sol";
 
 /// @title NFTSale
@@ -36,10 +37,14 @@ contract NFTSale is NFTTrade {
     error Underpaid(uint256 price, uint256 value);
     error RoyaltyAboveLimit(uint256 royalty, uint256 limit);
 
+    constructor(Market market) NFTTrade(market) {}
+
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
         returns (bytes memory)
     {
+        // Without this, any contract could make this handler announce a sale that never settled.
+        _requireFill();
         Config memory c = abi.decode(config, (Config));
         (address recipient, uint256 maxPrice) = abi.decode(input, (address, uint256));
         (uint256 price, address royaltyTo, uint256 royalty) = quote(c);

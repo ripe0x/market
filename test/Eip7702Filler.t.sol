@@ -6,7 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
 import {FillVerifier} from "../periphery/FillVerifier.sol";
-import {TokenExchange} from "../examples/TokenExchange.sol";
+import {NFTBid} from "../handlers/NFTBid.sol";
 import {Base} from "./utils/Base.sol";
 import {TestToken} from "./utils/Mocks.sol";
 
@@ -95,31 +95,34 @@ contract Eip7702FillerTest is Base {
         assertEq(take.allowance(eoa, address(order)), 0); // the approval was undone too
     }
 
+    /// Buying from an NFTSale: pay ETH, require the NFT.
     function test_honestHandlerPassesTheWalletsCheck() public {
-        bytes memory config = abi.encode(
-            TokenExchange.Config(IERC20(address(give)), IERC20(address(take)), 1, 1, seller, block.timestamp)
-        );
-        Order order = _create(seller, exchange, config);
-        give.mint(address(order), 10);
-        this.run(_buyGive(order, config, abi.encode(uint256(10), eoa)));
-        assertEq(give.balanceOf(eoa), 10);
-        assertEq(take.balanceOf(seller), 10);
+        (Order order, bytes memory config) = _listSale(seller, 7, 1 ether);
+        vm.deal(eoa, 1 ether);
+        bytes memory myNfts = abi.encodeCall(IERC721.balanceOf, (eoa));
+        WalletBatch.Call[] memory calls = new WalletBatch.Call[](3);
+        calls[0] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.snapshot, (address(nft), myNfts)));
+        calls[1] = WalletBatch.Call(address(order), 1 ether, abi.encodeCall(Order.fill, (config, abi.encode(eoa, 1 ether))));
+        calls[2] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(nft), myNfts, 1)));
+        this.run(calls);
+        assertEq(nft.ownerOf(7), eoa);
+        assertEq(seller.balance, 1 ether);
     }
 
-    /// Selling an NFT into a bid: the wallet requires the ETH it asked for, measured as its own
-    /// balance change through `FillVerifier.ethBalance`.
+    /// Selling an NFT into an NFTBid: the wallet approves the handler and requires the ETH it
+    /// asked for, measured as its own balance change through `FillVerifier.ethBalance`.
     function test_sellerChecksEthReceived() public {
-        bytes memory config = _bidConfig(seller, 5 ether, rising, _risingParams(1 ether, 0, 5000), address(0));
+        bytes memory config = abi.encode(NFTBid.Config(nft, true, 0, _fixed(1 ether), seller, 1));
         vm.deal(seller, 1 ether);
         vm.prank(seller);
-        Order bid = market.create{value: 1 ether}(acquisition, config, 0);
+        Order bid = market.create{value: 1 ether}(bids, config, 0);
         nft.mint(eoa, 7);
 
         bytes memory myEth = abi.encodeCall(verifier.ethBalance, (eoa));
         WalletBatch.Call[] memory calls = new WalletBatch.Call[](4);
         calls[0] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.snapshot, (address(verifier), myEth)));
-        calls[1] = WalletBatch.Call(address(nft), 0, abi.encodeCall(IERC721.approve, (address(bid), 7)));
-        calls[2] = WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 1 ether))));
+        calls[1] = WalletBatch.Call(address(nft), 0, abi.encodeCall(IERC721.approve, (address(bids), 7)));
+        calls[2] = WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 1 ether, eoa))));
         calls[3] = WalletBatch.Call(
             address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(verifier), myEth, 1 ether))
         );

@@ -7,9 +7,9 @@ Market is a permissionless, execution-agnostic Ethereum protocol. Market creates
 - `src/` is the core: `Market.sol` (factory) and `Order.sol` (account implementation plus `IOrderHandler`). Its only dependency is OpenZeppelin `Clones`.
 - `periphery/` holds optional contracts Market never calls: `FillVerifier.sol`.
 - `handlers/` holds the reference handlers meant for direct use: `NFTSale`, `NFTBid`, their base `NFTTrade`, and `HandlerBase`. Documented in `docs/NFT_TRADING.md`.
-- `examples/` holds teaching handlers and their helper contracts. Examples may use OpenZeppelin.
+- `examples/` holds `PaintAction` with `Artwork`, the one non-trading example handler. Handlers and examples may use OpenZeppelin.
 - `test/` holds Foundry tests; shared setup in `test/utils/`.
-- `script/` holds `Deploy.s.sol` (dry run by default) and `Demo.s.sol` with `demo.sh` (local anvil).
+- `script/` holds `Deploy.s.sol` (dry run by default; `run()` supported release, `examples()` PaintAction), `Lifecycle.s.sol` and `rehearse.sh` (fork rehearsal).
 
 ## Rules for changes
 
@@ -28,7 +28,6 @@ forge test --match-path test/<File>.t.sol        # per change
 CANDIDATE_RUN=1 forge test                       # whole suite, once per release candidate
 forge test --match-path test/Gas.t.sol --isolate # updates snapshots/GasTest.json
 forge test --match-path "test/fork/*" --isolate  # mainnet fork, updates snapshots/NFTFork.json
-script/demo.sh                                   # all four examples on a throwaway anvil
 forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co  # simulation only
 ```
 
