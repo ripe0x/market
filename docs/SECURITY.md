@@ -105,7 +105,7 @@
 13. **Collection-wide bids pay for any token.** An `NFTBid` with `anyToken` accepts every token of its collection at the current price, so sellers will offer the least valuable ones. A creator who cares needs `anyToken = false` or a handler that narrows eligibility.
 14. **One implementation for every order.** A bug in `Order` is a bug in every order, with no way to patch deployed orders. This was already true of identical full contracts; clones add one shared address that cannot be destroyed or replaced.
 15. **Counterfactual addresses depend on the handler's code.** `orderAddress` uses the handler's current code hash. Predicting an order for a handler that is not yet deployed gives a different address from the one `create` will use; deploy the handler first.
-16. **Handler events need a trusted source.** `Sold` and `Bought` describe genuine fills, but any contract can emit an event with the same signature. Read events only from the handler addresses you trust, and `Order.Filled` only from orders announced by `Market.Created`.
+16. **Handler events need a trusted source.** `Sold` and `Bought` describe genuine fills, but any contract can emit an event with the same signature. Read events only from the handler addresses you trust, and cross-reference `Market.Created` if only Market-created orders count: a clone of the implementation deployed without Market is a real order with real settlement (I1).
 17. **Explorer and tooling support.** Orders appear as minimal proxies. Their terms are read through the getters or decoded from the last 104 bytes of their code, not from storage.
 18. **Closing does not revoke.** A closed order still holds whatever approvals, roles and grants it was given until its owner revokes them (D003).
 19. **An active order is a commitment of authority, not an escrow guarantee.** It may be unfunded, its handler may deliberately move assets during fills, and permissions others granted it can be revoked by them. Read the handler and the current state before relying on an order.
@@ -189,3 +189,13 @@ Review of the whole system on 2026-11-10 by the implementing agent, before the s
 | S3 | Info | Approvals to `NFTBid` are shared by all its bids and holders; the documentation called the handler's authority "per order" in places. | Documentation corrected (README, NFT_TRADING.md, residual risk 5). No code change: the handler already moves a token only in a fill whose caller is the holder. |
 
 Other supported handlers checked for S1 and A1: `NFTBid` already authenticated its caller and holds approvals only for authenticated fills; `PaintAction` emits no events and holds nothing, and its effects go through the calling order, so a direct call acts only on the caller's own contract; `FillVerifier` has no authority and keys snapshots by caller. No supported contract asks a counterparty to approve or grant anything to an order the counterparty does not own.
+
+Independent AI review of the supported contracts at commit `69f2455` (a separate agent given the code, the owner's goals and the attack classes, not the author's conclusions). Proof-of-concept tests: `test/review/IndependentReviewPoC.t.sol`, 9 tests, all refusals. No critical, high, medium or low findings. The reviewer identified the load-bearing line as the `from` of `NFTBid`'s delivery: it is always the authenticated `caller`, so neither a clone deployed without Market, a third-party fill naming someone else's token, nor a closed order's owner can use a holder's approval. Informational notes:
+
+| # | Severity | Note | Resolution |
+| --- | --- | --- | --- |
+| I1 | Info | A clone of the implementation deployed without Market can be bound to a handler and emit genuine `Sold` or `Bought` for real, self-dealt settlement that `Market.Created` never announced | No change. Documented in NFT_TRADING.md and residual risk 16: cross-reference `Market.Created` to restrict to Market orders. |
+| I2 | Info | `PaintAction` has no `_requireFill` | Safe: it acts only through `Order(msg.sender).execute` and emits nothing (S2 covers the painter-role grant). |
+| I3 | Info | An `NFTBid` seller accepts the bidder's `recipient` from config, not input | By design; the seller is paid at least `minProceeds`. |
+
+Static analysis: Slither 0.11.5, 101 detectors, over `src/`, `handlers/`, `periphery/` and `examples/` compiled together (solc 0.8.30, via-IR). 21 results, none actionable; triage in STATUS.md.
