@@ -141,6 +141,23 @@ contract NFTBidTest is Base {
         _sell(order, config, 1, 0);
     }
 
+    function test_zeroProceedsRecipientRejected() public {
+        bytes memory config = _config(true, 0, _fixed(1 ether), 1);
+        Order order = _bid(config, 1 ether);
+        vm.prank(holder);
+        vm.expectRevert(NFTTrade.ZeroAddress.selector);
+        order.fill(config, abi.encode(1, 0, address(0)));
+    }
+
+    /// `maxFills` 0 means one token, like 1.
+    function test_zeroMaxFillsBuysOne() public {
+        bytes memory config = _config(true, 0, _fixed(1 ether), 0);
+        Order order = _bid(config, 2 ether);
+        _sell(order, config, 1, 0);
+        assertTrue(order.closed());
+        assertEq(art.ownerOf(1), vault);
+    }
+
     function test_ethWithFillRejected() public {
         bytes memory config = _config(true, 0, _fixed(1 ether), 1);
         Order order = _bid(config, 1 ether);
