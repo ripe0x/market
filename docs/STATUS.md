@@ -6,7 +6,7 @@ Updated 2026-11-10. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR
 
 Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
 
-**Sepolia:** on 2026-11-06 an earlier candidate was broadcast to Sepolia by the owner's account `0xCB43…17F9`: one transaction reverted out of gas, then ten deployments succeeded. Of those, `Market`, the `Order` implementation and `FillVerifier` are identical to this release and verified on Sourcify; the rest are obsolete. Earlier documentation said nothing had been broadcast; that was wrong. Full record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record). This release's `NFTSale` and `NFTBid` are not deployed anywhere, because no funded signer for this project was available.
+**Sepolia:** the supported release and the PaintAction example are deployed and verified on Sepolia (2026-11-10, from `main` at `865829a`, signer `ripe0x` = `0xCB43…17F9`), and the full lifecycle ran with real transactions: a fixed sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice, topped up, cancelled and recovered, and a PaintAction repaint. Every transaction was dry-run first and read back after. An earlier candidate deployed on 2026-11-06 left `Market`, the implementation and `FillVerifier` (reused) and seven obsolete contracts. Record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record).
 
 | Contract | Kind | State |
 | --- | --- | --- |
@@ -35,6 +35,8 @@ Candidate: production code at commit `33a5c6d` (the next commit adds two `NFTBid
 | Deployment gas | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` (simulation) | Supported release 3,682,037 gas, against 6,704,108 for the previous script's eleven contracts (45% less). `examples()`: 424,083. |
 | Mainnet fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Chain 1 forked at block 26,386,482: Deploy, examples, Lifecycle (fixed sale with royalty, falling sale cancelled and recovered, persistent bid filled twice and topped up, PaintAction) and recover all succeed. |
 | Sepolia fork rehearsal | `script/rehearse.sh` | Chain 11155111 forked at block 12,106,569: same, all succeed; `Market` and `FillVerifier` skipped as already deployed. |
+| Sepolia deployment | `script/Deploy.s.sol`, `examples()`, `script/Lifecycle.s.sol`, `recover` from `main` | All 29 transactions succeeded; post-state read back (DEPLOYMENT.md). Contracts verified on Etherscan and Sourcify. |
+| Remappings | `forge script script/Deploy.s.sol` with and without OpenZeppelin's nested submodules | Same addresses after `auto_detect_remappings = false` (PR #6); before, a recursive checkout compiled to different addresses. |
 | Idempotence | `Deploy.s.sol` broadcast twice to a local mainnet fork | Second run: "No transactions to broadcast". |
 | S1 regression | `forge test --match-path test/review/SaleEventPoC.t.sol` | 2 passed; both emitted a false `Sold` before the fix. |
 
@@ -64,10 +66,10 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
 3. Gas figures are local and fork measurements; real costs depend on calldata, warm or cold accounts and gas price.
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
-5. This release's `NFTSale`, `NFTBid` and `PaintAction` have no public-chain deployment, no Etherscan verification and no lifecycle executed with real transactions.
+5. Lifecycle on Sepolia used one account in every role and a test collection; no third-party wallets or real collections on a public chain.
 
 ## Next actions
 
 1. Owner decisions in DECISIONS.md, Owner review (items 1, 3, 4, 7, 8 open).
-2. With a funded Sepolia signer belonging to this project: run the commands in [DEPLOYMENT.md](DEPLOYMENT.md#sepolia) and record the results.
+2. Mainnet: the checklist in [DEPLOYMENT.md](DEPLOYMENT.md#mainnet-release-checklist), then the owner's explicit approval.
 3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.
