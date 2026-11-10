@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
-import {Order} from "../src/Order.sol";
 import {NFTTrade} from "./NFTTrade.sol";
 
 /// @title NFTBid
@@ -40,40 +39,23 @@ contract NFTBid is NFTTrade {
         uint256 maxFills;
     }
 
-    /// @dev Hash of the 45 byte ERC-1167 proxy code delegating to Market's order implementation.
-    /// Any account whose code starts with it runs `Order`, whoever deployed it, so its `fill`
-    /// reports the true caller.
-    bytes32 private immutable proxyHash;
-    /// @dev Proxy code plus the 104 bytes of arguments `Market` appends.
-    uint256 private constant CLONE_SIZE = 149;
-
     /// @notice Tokens bought by each order, written only by that order's own fills.
     mapping(address order => uint256) public fills;
 
     event Bought(address indexed order, address indexed seller, uint256 indexed tokenId, uint256 price, uint256 royalty);
 
-    error NotAFill();
     error WrongToken(uint256 tokenId);
     error InsufficientFunds(uint256 price, uint256 balance);
     error BelowMinProceeds(uint256 proceeds, uint256 minProceeds);
 
-    constructor(Market market) {
-        proxyHash = keccak256(
-            abi.encodePacked(
-                hex"363d3d373d3d3d363d73", market.implementation(), hex"5af43d82803e903d91602b57fd5bf3"
-            )
-        );
-    }
+    constructor(Market market) NFTTrade(market) {}
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
         returns (bytes memory)
     {
-        // `caller` is trustworthy only from a genuine order, bound to this handler, inside its
-        // fill: anyone can call this function, and after closing an order its owner can make
-        // the order call it outside a fill.
-        if (!_isOrder(msg.sender) || address(Order(payable(msg.sender)).handler()) != address(this)
-            || !Order(payable(msg.sender)).filling()) revert NotAFill();
+        // The approvals this handler holds may be used for `caller` only in a genuine fill.
+        _requireFill();
         if (value != 0) revert UnexpectedETH();
         Config memory c = abi.decode(config, (Config));
         (uint256 tokenId, uint256 minProceeds, address proceedsTo) = abi.decode(input, (uint256, uint256, address));
@@ -107,16 +89,5 @@ contract NFTBid is NFTTrade {
     /// @dev This handler moves the seller's token under the seller's approval to it.
     function _transfer(IERC721 nft, address from, address to, uint256 tokenId) internal override {
         nft.transferFrom(from, to, tokenId);
-    }
-
-    function _isOrder(address account) private view returns (bool) {
-        if (account.code.length != CLONE_SIZE) return false;
-        bytes32 h;
-        assembly ("memory-safe") {
-            let p := mload(0x40)
-            extcodecopy(account, p, 0, 45)
-            h := keccak256(p, 45)
-        }
-        return h == proxyHash;
     }
 }

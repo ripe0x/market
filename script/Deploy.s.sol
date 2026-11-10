@@ -4,16 +4,13 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {Market} from "../src/Market.sol";
 import {FillVerifier} from "../periphery/FillVerifier.sol";
-import {AcquisitionBid} from "../examples/AcquisitionBid.sol";
-import {CapitalShareStrategy, RisingStrategy} from "../examples/BidStrategies.sol";
-import {DutchAuction} from "../examples/DutchAuction.sol";
-import {PaintAction} from "../examples/PaintAction.sol";
-import {TokenExchange} from "../examples/TokenExchange.sol";
+import {NFTBid} from "../handlers/NFTBid.sol";
+import {NFTSale} from "../handlers/NFTSale.sol";
 
-/// @notice Deploys Market (which deploys the one Order implementation), the optional
-/// FillVerifier and the example handlers through the standard CREATE2 deployer, so every chain
-/// gets the same addresses and anyone can redeploy them. None of these contracts has an owner
-/// or constructor arguments.
+/// @notice Deploys Market (which deploys the one Order implementation), the NFT handlers and
+/// the optional FillVerifier through the standard CREATE2 deployer, so every chain gets the
+/// same addresses and anyone can redeploy them. None of these contracts has an owner; the
+/// handlers take the Market address.
 ///
 /// Dry run (simulation only, nothing is sent):
 ///   forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co
@@ -26,13 +23,9 @@ contract Deploy is Script {
         Market market = new Market{salt: SALT}();
         _log("Market", address(market));
         _log("Order implementation", market.implementation());
+        _log("NFTSale", address(new NFTSale{salt: SALT}(market)));
+        _log("NFTBid", address(new NFTBid{salt: SALT}(market)));
         _log("FillVerifier", address(new FillVerifier{salt: SALT}()));
-        _log("DutchAuction", address(new DutchAuction{salt: SALT}()));
-        _log("TokenExchange", address(new TokenExchange{salt: SALT}()));
-        _log("PaintAction", address(new PaintAction{salt: SALT}()));
-        _log("AcquisitionBid", address(new AcquisitionBid{salt: SALT}()));
-        _log("RisingStrategy", address(new RisingStrategy{salt: SALT}()));
-        _log("CapitalShareStrategy", address(new CapitalShareStrategy{salt: SALT}()));
         vm.stopBroadcast();
     }
 

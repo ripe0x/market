@@ -39,7 +39,7 @@ contract NFTForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://mainnet.gateway.tenderly.co")), BLOCK);
         market = new Market();
-        sale = new NFTSale();
+        sale = new NFTSale(market);
         bids = new NFTBid(market);
         vm.deal(buyer, 1000 ether);
         vm.deal(bidder, 1000 ether);

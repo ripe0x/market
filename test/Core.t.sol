@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
+import {NFTSale} from "../handlers/NFTSale.sol";
 import {Base} from "./utils/Base.sol";
 import {
     DrainHandler,
@@ -50,7 +51,7 @@ contract CoreTest is Base {
         bytes32 h = keccak256("a");
         address base = market.orderAddress(seller, probe, h, 0);
         assertTrue(base != market.orderAddress(buyer, probe, h, 0));
-        assertTrue(base != market.orderAddress(seller, IOrderHandler(address(dutch)), h, 0));
+        assertTrue(base != market.orderAddress(seller, IOrderHandler(address(sale)), h, 0));
         assertTrue(base != market.orderAddress(seller, probe, keccak256("b"), 0));
         assertTrue(base != market.orderAddress(seller, probe, h, bytes32(uint256(1))));
     }
@@ -75,15 +76,15 @@ contract CoreTest is Base {
     /// that is later deployed there.
     function test_counterfactualDeposit() public {
         nft.mint(seller, 1);
-        bytes memory config = abi.encode(_dutchConfig(1, seller));
-        address predicted = market.orderAddress(seller, dutch, keccak256(config), 0);
+        bytes memory config = abi.encode(NFTSale.Config(nft, 1, _fixed(1 ether), seller, 0));
+        address predicted = market.orderAddress(seller, sale, keccak256(config), 0);
         vm.prank(seller);
         nft.transferFrom(seller, predicted, 1);
 
         vm.prank(seller);
-        Order order = market.create(dutch, config, 0);
+        Order order = market.create(sale, config, 0);
         vm.prank(buyer);
-        order.fill{value: 10 ether}(config, abi.encode(buyer));
+        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
         assertEq(nft.ownerOf(1), buyer);
     }
 
@@ -342,22 +343,22 @@ contract CoreTest is Base {
         Order victimOfOwnChoice = _create(buyer, drain, "");
         vm.deal(address(victimOfOwnChoice), 3 ether);
 
-        (Order sale,) = _listDutch(seller, 1);
-        vm.deal(address(sale), 5 ether);
+        (Order victim,) = _listSale(seller, 1, 1 ether);
+        vm.deal(address(victim), 5 ether);
         nft.mint(seller, 2);
         vm.prank(seller);
-        nft.approve(address(sale), 2);
+        nft.approve(address(victim), 2);
 
         // Trying to move the unrelated order's NFT fails, so the whole fill reverts.
         vm.expectRevert(Order.Unauthorized.selector);
-        victimOfOwnChoice.fill("", abi.encode(address(sale), address(nft), 1));
+        victimOfOwnChoice.fill("", abi.encode(address(victim), address(nft), 1));
 
         // Without that, the drain handler takes only its own order's ETH.
         victimOfOwnChoice.fill("", "");
         assertEq(attacker.balance, 103 ether);
-        assertEq(address(sale).balance, 5 ether);
-        assertEq(nft.ownerOf(1), address(sale));
-        assertEq(nft.getApproved(2), address(sale));
+        assertEq(address(victim).balance, 5 ether);
+        assertEq(nft.ownerOf(1), address(victim));
+        assertEq(nft.getApproved(2), address(victim));
     }
 
     /// A handler pulling from an approval must use `caller`. Approving one order does not let
