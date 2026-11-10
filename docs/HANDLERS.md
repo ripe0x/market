@@ -116,7 +116,7 @@ Deployed addresses for each chain are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Create, fund, fill and cancel without a frontend
 
-With `cast`, using the reference sale handler. Replace the addresses with those for your chain; `$ME` is your account and signing flags (`--account <keystore>`) are omitted.
+With `cast`, using the reference sale handler. Replace the addresses with those for your chain; `$ME` is your account and signing flags (`--account ripe0x`) are omitted.
 
 ```bash
 SALT=0x0000000000000000000000000000000000000000000000000000000000000001

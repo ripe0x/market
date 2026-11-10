@@ -32,3 +32,7 @@ forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co  
 ```
 
 Tests must use `skip()` or absolute `vm.warp` values: with via-IR, `block.timestamp` may be cached within a test function, so `vm.warp(block.timestamp + n)` twice does not advance twice. Foundry clears transient storage between top-level calls in a test, so anything relying on it within one transaction (a fill, a `FillVerifier` snapshot and check) must run inside a single external call.
+
+## Deployment
+
+Deploy only from an up-to-date `main`. Signer: the Foundry keystore `ripe0x` (`--account ripe0x`), never a Ledger or another project's keystore. RPC: Tenderly's public gateways, `https://sepolia.gateway.tenderly.co` for Sepolia and `https://mainnet.gateway.tenderly.co` for mainnet. Follow the global chain-operations rules: dry run from the same signer, one confirmed broadcast at a time, readback after each.

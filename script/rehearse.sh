@@ -4,11 +4,11 @@
 # script/Lifecycle.s.sol exactly as a real deployment would, from anvil's unlocked default
 # account, then stops the fork. Nothing reaches the forked chain.
 # Usage: script/rehearse.sh [fork-rpc-url] [port]
-#   default fork: Sepolia, https://ethereum-sepolia-rpc.publicnode.com
+#   default fork: Sepolia, https://sepolia.gateway.tenderly.co
 #   mainnet:      script/rehearse.sh https://mainnet.gateway.tenderly.co
 set -euo pipefail
 cd "$(dirname "$0")/.."
-FORK="${1:-https://ethereum-sepolia-rpc.publicnode.com}"
+FORK="${1:-https://sepolia.gateway.tenderly.co}"
 PORT="${2:-8548}"
 RPC="http://127.0.0.1:$PORT"
 SENDER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
