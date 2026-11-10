@@ -21,7 +21,7 @@ The same in both handlers:
 
 Royalty rules:
 
-1. A collection that reports ERC2981 through ERC165 (`supportsInterface(0x2a55205a)`) is always paid. A collection that does not report it pays nothing, even if it has a `royaltyInfo` function.
+1. A collection that reports ERC2981 through ERC165 (`supportsInterface(0x2a55205a)`) is always paid. A collection that does not report it pays nothing, even if it has a `royaltyInfo` function. The ERC165 query gets 30,000 gas, as ERC165 specifies (OpenZeppelin `ERC165Checker`); a collection whose `supportsInterface` needs more is treated as not reporting.
 2. A royalty is never skipped. The fill reverts if `royaltyInfo` reverts, asks more than `price`, asks a nonzero amount with no receiver, or the receiver refuses the ETH.
 3. A sale's seller caps the royalty share with `maxRoyaltyBps`; above it the sale reverts rather than pay the seller less than agreed. A bid's seller is protected by `minProceeds`, which is net of royalty.
 

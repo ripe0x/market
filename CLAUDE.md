@@ -9,7 +9,7 @@ Market is a permissionless, execution-agnostic Ethereum protocol. Market creates
 - `handlers/` holds the reference handlers meant for direct use: `NFTSale`, `NFTBid`, their base `NFTTrade`, and `HandlerBase`. Documented in `docs/NFT_TRADING.md`.
 - `examples/` holds `PaintAction` with `Artwork`, the one non-trading example handler. Handlers and examples may use OpenZeppelin.
 - `test/` holds Foundry tests; shared setup in `test/utils/`.
-- `script/` holds `Deploy.s.sol` (dry run by default).
+- `script/` holds `Deploy.s.sol` (dry run by default; `run()` supported release, `examples()` PaintAction), `Lifecycle.s.sol` and `rehearse.sh` (fork rehearsal).
 
 ## Rules for changes
 

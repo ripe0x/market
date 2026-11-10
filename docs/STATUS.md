@@ -1,10 +1,12 @@
 # Status
 
-Updated 2026-11-10. Branch `feat/nft-trading` (PR #3).
+Updated 2026-11-10. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
 
 ## State
 
-Experimental. The core was merged to `main` on 2026-11-06 (PR #2). This branch adds the NFT trading handlers and, after a simplification review on 2026-11-10, cuts the repository down to the supported release (DECISIONS D301 to D304). **Not audited. Not deployed to mainnet.** No mainnet transaction, funded signing or paid service has been used.
+Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
+
+**Sepolia:** on 2026-11-06 an earlier candidate was broadcast to Sepolia by account `0xCB43…17F9`: one transaction reverted out of gas, then ten deployments succeeded. Of those, `Market`, the `Order` implementation and `FillVerifier` are identical to this release and verified on Sourcify; the rest are obsolete. Earlier documentation said nothing had been broadcast; that was wrong. Full record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record). This release's `NFTSale` and `NFTBid` are not deployed anywhere, because no funded signer for this project was available.
 
 | Contract | Kind | State |
 | --- | --- | --- |
@@ -30,6 +32,10 @@ Candidate: production code at commit `33a5c6d` (the next commit adds two `NFTBid
 | Compiler and EVM | `forge build --use 0.8.28 --evm-version cancun src handlers periphery examples` | Compiles. |
 | Static analysis | Slither 0.11.5, 101 detectors, `src/`, `handlers/`, `periphery/`, `examples/` compiled together | 21 results, none actionable. Triage below. |
 | Independent review | AI agent on `69f2455` | Nothing above informational; 9 PoC tests, all refusals (SECURITY.md, fifth review). |
+| Deployment gas | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` (simulation) | Supported release 3,682,037 gas, against 6,704,108 for the previous script's eleven contracts (45% less). `examples()`: 424,083. |
+| Mainnet fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Chain 1 forked at block 26,386,482: Deploy, examples, Lifecycle (fixed sale with royalty, falling sale cancelled and recovered, persistent bid filled twice and topped up, PaintAction) and recover all succeed. |
+| Sepolia fork rehearsal | `script/rehearse.sh` | Chain 11155111 forked at block 12,106,569: same, all succeed; `Market` and `FillVerifier` skipped as already deployed. |
+| Idempotence | `Deploy.s.sol` broadcast twice to a local mainnet fork | Second run: "No transactions to broadcast". |
 | S1 regression | `forge test --match-path test/review/SaleEventPoC.t.sol` | 2 passed; both emitted a false `Sold` before the fix. |
 
 Slither triage. `arbitrary-send-eth` (`Order.execute`): authorized by the lifecycle rules. `arbitrary-send-erc20` (`NFTBid._transfer`): `from` is the authenticated filler. `locked-ether` (`Market`): `create` forwards its ETH into the new order. `reentrancy-no-eth`, `reentrancy-events` (`Order.fill`, both handlers): reentry into the same order is refused by `filling`; events after calls only affect log order. `timestamp`: price schedules are time based by design. `missing-zero-check` (`execute` target): the caller's choice. `assembly`, `low-level-calls`: reviewed (`_arg`, `_isOrder`, `execute`'s revert bubbling, `FillVerifier`'s transient storage).
@@ -58,10 +64,11 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
 3. Gas figures are local and fork measurements; real costs depend on calldata, warm or cold accounts and gas price.
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
-5. Deployment, Sepolia and explorer verification: PR #4.
+5. This release's `NFTSale`, `NFTBid` and `PaintAction` have no public-chain deployment, no Etherscan verification and no lifecycle executed with real transactions.
+6. Who controls the 2026-11-06 Sepolia signer `0xCB43…17F9`.
 
 ## Next actions
 
 1. Owner decisions in DECISIONS.md, Owner review (items 1, 3, 4, 7, 8 open).
-2. PR #4: reduced deployment script, Sepolia, release checklist.
+2. With a funded Sepolia signer belonging to this project: run the commands in [DEPLOYMENT.md](DEPLOYMENT.md#sepolia) and record the results.
 3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.

@@ -69,7 +69,7 @@ contract BellHandler is IOrderHandler {
 
 The bell's owner makes the order the only account allowed to `ring()`; from then on it rings for whoever pays ([test/NewOrderType.t.sol](test/NewOrderType.t.sol)). Deploy the handler; no registration is needed.
 
-Rules that keep a handler safe to share:
+Rules that keep a handler safe to share (full guide, testing and `cast` walkthrough: [docs/HANDLERS.md](docs/HANDLERS.md)):
 
 1. **Act only through `Order(msg.sender).execute`.** Build every call yourself; never forward calldata from `input`.
 2. **Take only from `caller`,** and never under an approval to the order (below). Use `value` for the fill's ETH.
@@ -133,7 +133,7 @@ forge test --no-match-path "test/fork/*"
 forge test --match-path "test/fork/*" --isolate
 ```
 
-Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tenderly.co`, and pin block 26,357,000. `script/Deploy.s.sol` deploys the supported contracts through the standard CREATE2 deployer; without `--broadcast` it only simulates.
+Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tenderly.co`, and pin block 26,357,000. `script/Deploy.s.sol` deploys the supported contracts through the standard CREATE2 deployer; without `--broadcast` it only simulates. Addresses, Sepolia commands and the release checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Repository
 
@@ -143,8 +143,8 @@ handlers/   NFTSale, NFTBid and their bases NFTTrade, HandlerBase
 periphery/  FillVerifier.sol (optional)
 examples/   PaintAction + Artwork
 test/       unit, fuzz, invariant, composition, review PoCs and gas; test/fork: mainnet fork
-script/     Deploy.s.sol
-docs/       SPEC, NFT_TRADING, SECURITY, DECISIONS, STATUS
+script/     Deploy.s.sol, Lifecycle.s.sol, rehearse.sh
+docs/       HANDLERS, SPEC, NFT_TRADING, DEPLOYMENT, SECURITY, DECISIONS, STATUS
 ```
 
 ## License
