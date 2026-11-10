@@ -9,7 +9,7 @@
 
 ## Addresses
 
-Every contract deploys through the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")` and has no owner. The address depends only on the bytecode (and constructor argument), so it is the same on every chain and anyone can deploy it. **Any change to a contract's Solidity source, including a comment, changes its metadata and therefore its address.** `forge script script/Deploy.s.sol` prints the current addresses without sending anything.
+Every contract deploys through the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")` and has no owner. The address depends only on the bytecode (and constructor argument), so it is the same on every chain and anyone can deploy it. **Any change to a contract's Solidity source, including a comment, changes its metadata and therefore its address.** `forge script script/Deploy.s.sol` prints the current addresses without sending anything. If it prints addresses other than the tables below for unchanged code, stop: the build differs. `foundry.toml` fixes the remappings (`auto_detect_remappings = false`) because they are part of the metadata; before that fix, a checkout with OpenZeppelin's nested submodules (`git submodule update --recursive`) compiled to different bytecode and addresses (found 2026-11-10).
 
 Supported release (`forge script script/Deploy.s.sol`):
 

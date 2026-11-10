@@ -9,9 +9,14 @@ evm_version = "prague"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+# Remappings are part of every contract's metadata, so they change bytecode and CREATE2
+# addresses. Auto-detection would add remappings for whatever nested submodules happen to be
+# checked out (`--recursive` adds OpenZeppelin's test dependencies), so the list is fixed here.
+auto_detect_remappings = false
 remappings = [
   "forge-std/=lib/forge-std/src/",
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "openzeppelin-contracts/=lib/openzeppelin-contracts/",
 ]
 
 [fuzz]
