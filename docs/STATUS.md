@@ -1,12 +1,12 @@
 # Status
 
-Updated 2026-11-10. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
+Updated 2026-11-11. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
 
 ## State
 
 Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
 
-**Sepolia:** the supported release and the PaintAction example are deployed and verified on Sepolia (2026-11-10, from `main` at `865829a`, signer `ripe0x` = `0xCB43…17F9`), and the full lifecycle ran with real transactions: a fixed sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice, topped up, cancelled and recovered, and a PaintAction repaint. Every transaction was dry-run first and read back after. An earlier candidate deployed on 2026-11-06 left `Market`, the implementation and `FillVerifier` (reused) and seven obsolete contracts. Record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record).
+**Sepolia:** the supported release and the PaintAction example are deployed and verified on Sepolia (2026-11-10, from `main` at `865829a`, signer `ripe0x` = `0xCB43…17F9`), and the full lifecycle ran with real transactions: a fixed sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice, topped up, cancelled and recovered, and a PaintAction repaint. On 2026-11-10 and 11 an arena (`script/Arena.s.sol`) traded between separate seller, bidder, holder and royalty contracts, matched a falling sale into a rising bid through an independent matcher, and ran 17 attacks against the live contracts; all were refused and every ETH flow reconciled. Every transaction was dry-run first and read back after. An earlier candidate deployed on 2026-11-06 left `Market`, the implementation and `FillVerifier` (reused) and seven obsolete contracts. Record: [DEPLOYMENT.md](DEPLOYMENT.md#deployment-record).
 
 | Contract | Kind | State |
 | --- | --- | --- |
@@ -36,6 +36,8 @@ Candidate: production code at commit `33a5c6d` (the next commit adds two `NFTBid
 | Mainnet fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Chain 1 forked at block 26,386,482: Deploy, examples, Lifecycle (fixed sale with royalty, falling sale cancelled and recovered, persistent bid filled twice and topped up, PaintAction) and recover all succeed. |
 | Sepolia fork rehearsal | `script/rehearse.sh` | Chain 11155111 forked at block 12,106,569: same, all succeed; `Market` and `FillVerifier` skipped as already deployed. |
 | Sepolia deployment | `script/Deploy.s.sol`, `examples()`, `script/Lifecycle.s.sol`, `recover` from `main` | All 29 transactions succeeded; post-state read back (DEPLOYMENT.md). Contracts verified on Etherscan and Sourcify. |
+| Sepolia arena | `script/Arena.s.sol` `setup`, `attack`, `settle`, `cleanup` from `main` at `9d0ebe9` | 29 transactions succeeded; 17 attacks refused with the intended errors; payouts sum to the 0.012 ETH the bid paid; all balances end at 0 (DEPLOYMENT.md, Arena). |
+| Sepolia live fork | `forge test --match-path test/fork/SepoliaLive.t.sol` | 6 passed at block 12,107,304: live bytecode matches the build, the arena, royalty receiver cannot refill a bid, EIP-7702 buyer with the live verifier, 64 fuzz runs conserving value, lifecycle orders inert. |
 | Remappings | `forge script script/Deploy.s.sol` with and without OpenZeppelin's nested submodules | Same addresses after `auto_detect_remappings = false` (PR #6); before, a recursive checkout compiled to different addresses. |
 | Idempotence | `Deploy.s.sol` broadcast twice to a local mainnet fork | Second run: "No transactions to broadcast". |
 | S1 regression | `forge test --match-path test/review/SaleEventPoC.t.sol` | 2 passed; both emitted a false `Sold` before the fix. |
@@ -66,7 +68,7 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
 3. Gas figures are local and fork measurements; real costs depend on calldata, warm or cold accounts and gas price.
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
-5. Lifecycle on Sepolia used one account in every role and a test collection; no third-party wallets or real collections on a public chain.
+5. Sepolia runs used contracts controlled by one signer and test collections; no third-party wallets, independent fillers or real collections on a public chain.
 
 ## Next actions
 
