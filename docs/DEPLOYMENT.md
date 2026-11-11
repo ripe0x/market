@@ -47,6 +47,7 @@ On a chain where `Market` and `FillVerifier` already exist (Sepolia today), the 
 | --- | --- | --- |
 | [`script/Deploy.s.sol`](../script/Deploy.s.sol) | `run()`: the supported release. `examples()`: PaintAction. Skips contracts already deployed, so a partial run resumes and a repeat sends nothing | Only with `--broadcast` |
 | [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol) | From one account: a test ERC2981 collection, a fixed-price sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice and topped up, and the PaintAction example. `recover(address)` then cancels the bid and withdraws what it holds | Only with `--broadcast`; about 0.012 ETH plus gas |
+| [`script/Arena.s.sol`](../script/Arena.s.sol) | Multi-party trading and onchain attacks against the live release, from one signer through CREATE2 party contracts: `setup(id)`, `attack(id, start)`, `settle(id, start)`, `cleanup(id, start)` | Only with `--broadcast`; returns all ETH except gas |
 | [`script/rehearse.sh`](../script/rehearse.sh) | Runs Deploy, examples, Lifecycle and recover on a throwaway anvil fork (Sepolia by default; pass a mainnet RPC for mainnet) from anvil's unlocked account | Only to the local fork |
 
 Deploy only from an up-to-date `main` checkout, with the owner's Foundry keystore `ripe0x` (`--account ripe0x`; `cast wallet address --account ripe0x` prints its address for `--sender`). Use Tenderly's public gateways: `https://sepolia.gateway.tenderly.co` and `https://mainnet.gateway.tenderly.co`. Every broadcast needs the owner's confirmation immediately before it, after a dry run from the same signer; read back the receipt and state before the next one. Never put a private key in a command, file or environment variable.
@@ -169,3 +170,48 @@ Lifecycle (`script/Lifecycle.s.sol`), 24 transactions, nonces 5846 to 5869, bloc
 | PaintAction, 0.001 ETH | `0x79b774a5deebc99ece38d30d204a1d473e38da8a` | Artwork `0x3aEE…5d0E` token 1 painted color 2; painter role resigned; order closed | [`0x18b5113a…`](https://evm.now/tx/0x18b5113ad345c966f0287b1cdf6597ee73db2176e7d7091cc6a5041caf62bc62?chainId=11155111) |
 
 Verification note: `--verify` in the broadcast failed each time because Etherscan had not yet indexed the new code; rerunning `forge verify-contract` a minute later passed.
+
+### Arena, Sepolia, 2026-11-10 to 2026-11-11
+
+`script/Arena.s.sol` from `main` (PR #8, `9d0ebe9`), arena id 1, start `1794347604`, signer `ripe0x` (`0xCB43…17F9`), Tenderly gateway, each broadcast dry-run first and read back after. Separate contracts play seller, bidder, holder and royalty receiver (`artist`), so no role shares an address. All 29 transactions succeeded, 27,620,660 gas. The signer's balance fell by 0.000006411880960076 ETH, all gas; every arena contract and both orders end at 0 ETH.
+
+| Broadcast | Nonces | Blocks | Gas | Result |
+| --- | --- | --- | --- | --- |
+| `setup` | 5872 to 5890 | 12,107,429 to 12,107,457 | 25,948,102 | Parties, `ArenaNFT` `0x9ab3…Fa40` (5% royalty to the artist), matcher, adversary and attack helpers; tokens 1 (seller), 2 and 3 (holder); falling sale `0x26c3dba049D6d6120405f532a31000F996494b4E` (0.01 to 0.001 ETH over 30 minutes) and funded rising bid `0x4968893dcBe9A7123Be8813A9FE3793f0CE0E0a1` (0.002 to 0.006 ETH, any token, 2 fills, 0.012 ETH); the holder approves `NFTBid` |
+| `attack` | 5891 | 12,107,543 | 641,008 | [`0xf4d81a25…`](https://evm.now/tx/0xf4d81a251dbc5a53418572ddcc74e02e07e42554414e595d94227c82e51bb405?chainId=11155111): 15 attacks in one transaction, all refused (below) |
+| `settle` | 5892, 5893 | 12,107,578, 12,107,579 | 783,604 | [`0x82b91f51…`](https://evm.now/tx/0x82b91f51e13b946ccb887a0316ccbc87885682e8758534b4020812a19cbfa90b?chainId=11155111): the independent matcher buys token 1 from the sale and sells it into the bid in one transaction; [`0xb7871b65…`](https://evm.now/tx/0xb7871b65fbe74f9c6f28a90017a462cb02cd270f9e5c4809a2ea04dadac4fb64?chainId=11155111): the holder sells token 2 into the bid, its last fill, which closes it |
+| `cleanup` | 5894 to 5900 | 12,113,030 to 12,113,037 | 247,946 | The closed bid's owner tries to take the holder's token 3 (refused, below); the holder revokes its approval; every party and the adversary return their ETH |
+
+Attacks, each recorded by an `Attempt` event with its revert data:
+
+| # | Attack | Refused with |
+| --- | --- | --- |
+| 1 | `NFTSale.onFill` called directly | `NotAFill` |
+| 2 | `NFTBid.onFill` called directly, naming the holder | `NotAFill` |
+| 3 | Counterfeit order makes `NFTSale` announce a `Sold` (S1) | `NotAFill` |
+| 4 | Closed rogue clone of the bid uses the holder's approval to `NFTBid` | `NotAFill` |
+| 5 | Funded rogue clone filled for the holder's token | `ERC721IncorrectOwner` |
+| 6 | Live bid filled naming the holder's token | `ERC721IncorrectOwner` |
+| 7 | `execute` on someone else's active sale | `Unauthorized` |
+| 8 | `close` someone else's sale | `Unauthorized` |
+| 9 | Fill a sale with tampered config | `WrongConfig` |
+| 10 | Underpay a live sale | `Underpaid` |
+| 11 | Hostile handler reaches the live bid | `Unauthorized` |
+| 12 | `execute` on the `Order` implementation | `Unauthorized` |
+| 13 | Fill a closed order | `OrderClosed` |
+| 14 | `execute` a closed order as non-owner | `Unauthorized` |
+| 15 | Pull the holder's token directly | `ERC721InsufficientApproval` |
+| 16 | Closed bid's owner `execute`s `transferFrom(holder, …, 3)` (cleanup, [`0xcf8b8e29…`](https://evm.now/tx/0xcf8b8e29349cacb2d0983d96a0e83305ebfa0963919030043080b29a02c3bfdf?chainId=11155111)) | `ERC721InsufficientApproval` |
+| 17 | Closed bid's owner `execute`s `NFTBid.onFill` for token 3 (cleanup, [`0xb3e5d77c…`](https://evm.now/tx/0xb3e5d77ce37fca041a2a0755b213f911eb89aa7a03ba94cb9df828f0bb21ac02?chainId=11155111)) | `NotAFill` |
+
+Settlement ran after both schedules ended: ask 0.001 ETH, bid 0.006 ETH per token. Read back at block 12,107,579:
+
+| Account | ETH change | From |
+| --- | --- | --- |
+| Seller | +0.00095 | Ask less 5% royalty |
+| Holder | +0.0057 | Bid less 5% royalty |
+| Artist | +0.00065 | Royalties on all three payments |
+| Matcher, to the signer | +0.0047 | Spread; overpayment of 0.00114 refunded |
+| Bid order | −0.012 | Two fills; empty and closed |
+
+The four gains sum to 0.012 ETH. Tokens 1 and 2 belong to the bidder, token 3 to the holder; both orders are closed. After cleanup: holder's approval to `NFTBid` false, all balances 0. The same flows and attacks pass against forked Sepolia state in `test/fork/SepoliaLive.t.sol` (block 12,107,304, 6 tests).
