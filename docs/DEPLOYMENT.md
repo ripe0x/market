@@ -4,7 +4,7 @@
 
 | Chain | Chain ID | Status |
 | --- | --- | --- |
-| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-10): the supported release and the PaintAction example, at the addresses below, verified on Etherscan and Sourcify; lifecycle executed with real transactions. Contracts deployed on 2026-11-06 at other addresses are obsolete (see "Deployment record") |
+| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-10): the supported release before the 0.5% fee (D305; the fee versions of `NFTSale` and `NFTBid` are not deployed yet) and the PaintAction example, at the addresses below, verified on Etherscan and Sourcify; lifecycle executed with real transactions. Contracts deployed on 2026-11-06 at other addresses are obsolete (see "Deployment record") |
 | Ethereum mainnet | 1 | **Not deployed.** Simulated only. Needs the release checklist below and the owner's explicit approval |
 
 ## Addresses
@@ -17,8 +17,8 @@ Supported release (`forge script script/Deploy.s.sol`):
 | --- | --- | --- |
 | `Market` | `0x8210144750E6237740bf71b819f87A834905445d` | none |
 | `Order` implementation (created by Market) | `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87` | none |
-| `NFTSale` | `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `Market` address |
-| `NFTBid` | `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `Market` address |
+| `NFTSale` | Not yet deployed with the fee. Before the fee: `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `Market` address, fee recipient (`FEE_TO` in `script/Deploy.s.sol`) |
+| `NFTBid` | Not yet deployed with the fee. Before the fee: `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `Market` address, fee recipient |
 | `FillVerifier` (optional) | `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` | none |
 
 Example, deployed separately (`forge script script/Deploy.s.sol --sig "examples()"`), not part of the supported release:

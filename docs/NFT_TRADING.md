@@ -1,6 +1,6 @@
 # NFT trading handlers
 
-`NFTSale` and `NFTBid` are the reference handlers for trading ERC721s for native ETH on Market. They are ordinary handlers: no core change, no registry, no fee. Any number of orders can use one deployment of each, each with its own configuration.
+`NFTSale` and `NFTBid` are the reference handlers for trading ERC721s for native ETH on Market. They are ordinary handlers: no core change, no registry. Each charges a fixed 0.5% fee per fill (below); Market itself takes nothing. Any number of orders can use one deployment of each, each with its own configuration.
 
 > **Status: experimental, unaudited.** Tested with unit, fuzz, invariant and mainnet fork tests (see [STATUS.md](STATUS.md)). That is evidence about tested behaviour, not a safety claim.
 
@@ -17,15 +17,16 @@ The same in both handlers:
 
 1. **`price`** is everything the buyer spends. Nothing is added on top.
 2. **`royalty`** is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, paid out of `price` to the collection's receiver in the same transaction.
-3. **`proceeds = price - royalty`** go to the seller.
+3. **`fee`** is 0.5% of `price` (`FEE_BPS = 50`, rounded down, so prices under 200 wei pay none), paid out of `price` to `feeTo`. Both are fixed when the handler is deployed; nobody can change them (D305).
+4. **`proceeds = price - royalty - fee`** go to the seller.
 
 Royalty rules:
 
 1. A collection that reports ERC2981 through ERC165 (`supportsInterface(0x2a55205a)`) is always paid. A collection that does not report it pays nothing, even if it has a `royaltyInfo` function. The ERC165 query gets 30,000 gas, as ERC165 specifies (OpenZeppelin `ERC165Checker`); a collection whose `supportsInterface` needs more is treated as not reporting.
-2. A royalty is never skipped. The fill reverts if `royaltyInfo` reverts, asks more than `price`, asks a nonzero amount with no receiver, or the receiver refuses the ETH.
-3. A sale's seller caps the royalty share with `maxRoyaltyBps`; above it the sale reverts rather than pay the seller less than agreed. A bid's seller is protected by `minProceeds`, which is net of royalty.
+2. A royalty is never skipped. The fill reverts if `royaltyInfo` reverts, asks more than `price` less the fee, asks a nonzero amount with no receiver, or the receiver refuses the ETH.
+3. A sale's seller caps the royalty share with `maxRoyaltyBps`; above it the sale reverts rather than pay the seller less than agreed. A bid's seller is protected by `minProceeds`, which is net of royalty and fee.
 
-There are no other fees. Applications that want a fee or a split can write their own handler, or pay `proceedsTo` into a splitter.
+There are no other fees. A `feeTo` that refuses ETH would stop every fill of that deployment; nothing would be lost, and owners would close and recover. Applications that want a split can pay `proceedsTo` into a splitter.
 
 ## Price schedule
 
@@ -58,17 +59,17 @@ Rounding: the movement between the end points rounds down, so the price is never
 | --- | --- |
 | `nft`, `tokenId` | The token for sale |
 | `schedule` | Price schedule and fill window |
-| `proceedsTo` | Receives `price - royalty`. Must not be zero |
+| `proceedsTo` | Receives `price - royalty - fee`. Must not be zero |
 | `maxRoyaltyBps` | Highest royalty share the seller accepts, in basis points of `price` |
 
 **Input** (`abi.encode(address recipient, uint256 maxPrice)`): `recipient` receives the token; the fill reverts if the current price is above `maxPrice`. Send at least the price as ETH; the excess returns to the caller.
 
-**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill (`NotAFill`), check config and window, compute price and royalty, check `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
+**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill (`NotAFill`), check config and window, compute price and royalty, check `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay the fee, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty, fee)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
 
 **Lifecycle:**
 
 1. Seller: `market.create(nftSale, config, salt)`, then `nft.transferFrom(seller, order, tokenId)`. Or transfer to `market.orderAddress(seller, nftSale, keccak256(config), salt)` first and create after; the address has no code until then, so `safeTransferFrom` makes no callback.
-2. Buyer: `sale.quote(config)` for `(price, royaltyTo, royalty)`, then `order.fill{value: price}(config, abi.encode(recipient, price))`.
+2. Buyer: `sale.quote(config)` for `(price, royaltyTo, royalty, fee)`, then `order.fill{value: price}(config, abi.encode(recipient, price))`.
 3. Cancel: `order.close()`, then `order.execute(nft, 0, transferFrom(order, seller, tokenId))`. Stray ETH: `order.execute(seller, amount, "")`.
 
 The order holds no approvals, so nothing remains to revoke after a sale or cancellation.
@@ -89,14 +90,14 @@ The order holds no approvals, so nothing remains to revoke after a sale or cance
 
 **Seller's approval goes to the handler, not the order.** The holder calls `nft.approve(nftBid, tokenId)` or `nft.setApprovalForAll(nftBid, true)`. See "Why the bid handler holds the approval" below.
 
-**Input** (`abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`): the token to sell, the least `price - royalty` the seller accepts, and where to send it (not zero).
+**Input** (`abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`): the token to sell, the least `price - royalty - fee` the seller accepts, and where to send it (not zero).
 
-**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill, refuse ETH, check token eligibility, window and funds, compute price and royalty, check `minProceeds`, count the fill and close if it is the last, move the token from the caller to `recipient` and check `ownerOf`, pay the royalty, pay `proceedsTo`. Returns `abi.encode(price, royalty)`. Emits `Bought(order, seller, tokenId, price, royalty)`. `fills(order)` counts tokens bought.
+**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill, refuse ETH, check token eligibility, window and funds, compute price and royalty, check `minProceeds`, count the fill and close if it is the last, move the token from the caller to `recipient` and check `ownerOf`, pay the royalty, pay the fee, pay `proceedsTo`. Returns `abi.encode(price, royalty, fee)`. Emits `Bought(order, seller, tokenId, price, royalty)`. `fills(order)` counts tokens bought.
 
 **Lifecycle:**
 
 1. Bidder: `market.create{value: funds}(nftBid, config, salt)`.
-2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty)`; `order.fill(config, abi.encode(tokenId, price - royalty, me))`.
+2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty, fee)`; `order.fill(config, abi.encode(tokenId, price - royalty - fee, me))`.
 3. Cancel: `order.close()`, then `order.execute(bidder, address(order).balance, "")`.
 
 ### Both handlers act only inside a genuine fill
@@ -158,17 +159,17 @@ Not covered: ERC1155, ERC20 payment, criteria other than one token or a whole co
 
 ## Gas
 
-Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account).
+Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account). The fee recipient is an existing account; paying the fee adds about 12,000 gas per fill.
 
 | Operation | Gas |
 | --- | --- |
 | Create a listing | 95,227 |
-| Deposit the token into the listing | 67,026 (Azuki) to 110,187 (BAYC) |
+| Deposit the token into the listing | 67,026 (Azuki) to 110,175 (BAYC) |
 | Create a funded bid | 95,618 |
-| Sale fill, no royalty | 165,277 (Azuki) to 219,670 (BAYC) |
-| Sale fill with royalty | 185,595 (Moonbirds 1%) to 212,366 (Chimpers 5.5%, splitter) |
-| Bid fill, no royalty | 132,592 (Azuki) to 187,306 (BAYC) |
-| Bid fill with royalty | 165,447 (Opepen 2.5%) to 174,491 (Chimpers) |
+| Sale fill, no royalty | 177,244 (Azuki) to 231,637 (BAYC) |
+| Sale fill with royalty | 197,717 (Moonbirds 1%) to 224,488 (Chimpers 5.5%, splitter) |
+| Bid fill, no royalty | 144,525 (Azuki) to 199,239 (BAYC) |
+| Bid fill with royalty | 177,535 (Opepen 2.5%) to 186,579 (Chimpers) |
 | Close | 47,129 |
 | Recover the NFT from a closed sale | 54,705 |
 | Recover the ETH from a closed bid | 34,685 |
@@ -184,8 +185,8 @@ Seaport 1.6 fills of single orders sent directly to Seaport in mainnet blocks 26
 
 What the numbers mean:
 
-1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: a bit above its most efficient basic path, near the median of advanced orders. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, and the genuine-fill check (about 2,500).
-2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (95,227) plus a transaction moving the token into escrow (67,026 to 110,187), about 162,000 to 205,000 in all; a Market bid costs one create with its ETH (95,618). At 1 gwei that is about 0.0001 to 0.0002 ETH per order.
+1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: a bit above its most efficient basic path, near the median of advanced orders. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, the genuine-fill check (about 2,500) and the fee transfer (about 12,000). Seaport's own fee, where a marketplace adds one, is an extra transfer too.
+2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (95,227) plus a transaction moving the token into escrow (67,026 to 110,175), about 162,000 to 205,000 in all; a Market bid costs one create with its ETH (95,618). At 1 gwei that is about 0.0001 to 0.0002 ETH per order.
 3. **What the gas buys.** The order exists onchain with its funds or token escrowed, so it needs no offchain order book, cannot be filled after it is unfunded or the token has moved elsewhere, and can be discovered from `Market.Created` events alone. Seaport's offers are cheaper to place and can be over-subscribed against one WETH balance; a Market bid escrows exactly what it can spend.
 4. **Escrow tradeoff.** A listed NFT is in its order, not the seller's wallet. Other marketplaces will not show it as the seller's, and it cannot be listed elsewhere at the same time.
 

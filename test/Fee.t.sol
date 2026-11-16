@@ -107,6 +107,18 @@ contract FeeTest is Base {
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
     }
 
+    /// Under 200 wei the fee rounds to 0, so a 100% royalty still settles: all to the royalty.
+    function test_tinyPricePaysNoFeeAndFullRoyalty() public {
+        art.setRoyalty(royalty, 10_000);
+        (Order order, bytes memory config) = _listArt(sale, 199, 10_000);
+        vm.prank(buyer);
+        order.fill{value: 199}(config, abi.encode(buyer, 199));
+        assertEq(royalty.balance, 199);
+        assertEq(treasury.balance, 0);
+        assertEq(seller.balance, 0);
+        assertEq(art.ownerOf(1), buyer);
+    }
+
     /// A fee recipient that refuses ETH stops every fill; nothing moves and the owner recovers.
     function test_refusingFeeRecipientBlocksFillsButNotRecovery() public {
         NFTSale blocked = new NFTSale(market, address(new RefusingTreasury()));

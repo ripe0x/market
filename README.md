@@ -4,7 +4,7 @@ Market is a permissionless Ethereum protocol for trading authorized onchain exec
 
 Someone who can make something happen onchain (transfer an NFT, spend ETH, repaint an artwork, call any contract) turns that ability into an **order**: an independent account holding the authority, bound to code that says on what terms anyone may use it. Anyone can **fill** the order by meeting those terms. The execution and its payment settle in one transaction or not at all.
 
-The core is two small contracts with no owner, no fees, no registry, no upgrade path and no knowledge of what is traded.
+The core is two small contracts with no owner, no fees, no registry, no upgrade path and no knowledge of what is traded. The reference NFT handlers charge a fixed 0.5% per fill.
 
 > **Status: experimental, unaudited.** Tests and automated reviews are evidence about tested behaviour, not a safety claim ([docs/STATUS.md](docs/STATUS.md), [docs/SECURITY.md](docs/SECURITY.md)). Nothing is deployed to mainnet.
 
@@ -43,7 +43,7 @@ Order order = market.create(nftSale, config, salt);
 nft.transferFrom(seller, address(order), 7);            // the order is the escrow
 
 // Buyer: read config from the Created event, quote, fill.
-(uint256 price,,) = nftSale.quote(c);
+(uint256 price,,,) = nftSale.quote(c);
 order.fill{value: price}(config, abi.encode(buyer, price)); // recipient, max price
 
 // Seller, to cancel instead: close, then recover.
@@ -109,7 +109,7 @@ NFT trading semantics, lifecycle, compatibility with real collections and gas: [
 | A fill is atomic and cannot reenter the same order | Prices, limits, expiry, royalties |
 | After `close`, no fills; the owner recovers without calling the handler | Behaviour of NFT collections, royalty receivers and other contracts called |
 | One order's assets and approvals are unusable by any other order | Approvals given to a handler, or to an order by someone other than its owner |
-| No fee, owner, registry or upgrade path | Whether a filler received what it expected (check it yourself, e.g. with `FillVerifier`) |
+| `Market` takes no fee and has no owner, registry or upgrade path | Whether a filler received what it expected (check it yourself, e.g. with `FillVerifier`) |
 
 Threat model, residual risks and review findings: [docs/SECURITY.md](docs/SECURITY.md). Design decisions: [docs/DECISIONS.md](docs/DECISIONS.md).
 

@@ -113,6 +113,7 @@
 20. **Owners cannot service active orders.** Anything that needs the order itself to act after creation (grant or refresh an approval, accept a two-step ownership transfer, claim an airdrop, vote) is possible only through the handler during a fill, or after closing. A handler without such a path leaves those actions until the order is closed.
 21. **Nested fills on a shared handler.** While two orders bound to one handler are both filling, the handler can act through either. Only the handler's discipline keeps them apart (threats above).
 22. **NFT handler assumptions.** Collections are trusted to report `ownerOf` honestly; a royalty receiver that reverts blocks every fill of its collection; collections that do not report ERC2981 through ERC165 pay no royalty; collection-wide bids pay for the least valuable eligible token. See [NFT_TRADING.md](NFT_TRADING.md), "Security assumptions".
+23. **Fee recipient (D305).** Each `NFTSale` and `NFTBid` deployment pays 0.5% of every fill to a fixed `feeTo`. If that account ever refuses ETH (a contract that reverts, a Safe misconfigured with a reverting fallback), every fill of that deployment reverts; nothing is lost and owners close and recover, but trading through it stops for good. If its key or signers are lost, the fees still go there and are lost. The rate and recipient cannot be changed; a new deployment is the only remedy.
 
 ## Review findings
 
