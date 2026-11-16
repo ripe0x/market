@@ -4,22 +4,22 @@
 
 | Chain | Chain ID | Status |
 | --- | --- | --- |
-| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-10): the supported release before the 0.5% fee (D305; the fee versions of `NFTSale` and `NFTBid` are not deployed yet) and the PaintAction example, at the addresses below, verified on Etherscan and Sourcify; lifecycle executed with real transactions. Contracts deployed on 2026-11-06 at other addresses are obsolete (see "Deployment record") |
+| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-10), but predating this revision. The `Market`, `NFTSale` and `NFTBid` on Sepolia predate the settable fee and the creation-time core change (D305 to D308). `Market`'s bytecode changed (D306), so its address and everything derived from it move; `Market`, `NFTSale` and `NFTBid` must all be redeployed once the owner supplies the fee recipient. `FillVerifier` and `PaintAction` are unchanged and keep their addresses. Contracts deployed on 2026-11-06 at other addresses are obsolete (see "Deployment record") |
 | Ethereum mainnet | 1 | **Not deployed.** Simulated only. Needs the release checklist below and the owner's explicit approval |
 
 ## Addresses
 
 Every contract deploys through the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")` and has no owner. The address depends only on the bytecode (and constructor argument), so it is the same on every chain and anyone can deploy it. **Any change to a contract's Solidity source, including a comment, changes its metadata and therefore its address.** `forge script script/Deploy.s.sol` prints the current addresses without sending anything. If it prints addresses other than the tables below for unchanged code, stop: the build differs. `foundry.toml` fixes the remappings (`auto_detect_remappings = false`) because they are part of the metadata; before that fix, a checkout with OpenZeppelin's nested submodules (`git submodule update --recursive`) compiled to different bytecode and addresses (found 2026-11-10).
 
-Supported release (`forge script script/Deploy.s.sol`):
+Supported release (`forge script script/Deploy.s.sol`). The creation-time core change (D306) altered `Market`'s bytecode, so `Market`, the `Order` implementation it creates, and the two handlers that pin that implementation all deploy to new addresses; they are not deployed anywhere yet. Run `forge script script/Deploy.s.sol` to print the current addresses before deploying. The old addresses below are the pre-revision Sepolia deployment, kept for reference only.
 
 | Contract | Address | Constructor |
 | --- | --- | --- |
-| `Market` | `0x8210144750E6237740bf71b819f87A834905445d` | none |
-| `Order` implementation (created by Market) | `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87` | none |
-| `NFTSale` | Not yet deployed with the fee. Before the fee: `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `Market` address, fee recipient (`FEE_TO` in `script/Deploy.s.sol`) |
-| `NFTBid` | Not yet deployed with the fee. Before the fee: `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `Market` address, fee recipient |
-| `FillVerifier` (optional) | `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` | none |
+| `Market` | Address changes with this revision (D306); not yet deployed. Before the change: `0x8210144750E6237740bf71b819f87A834905445d` | none |
+| `Order` implementation (created by Market) | Changes with `Market`'s address; not yet deployed. Before: `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87` | none |
+| `NFTSale` | Not yet deployed with the settable fee (its address also moves with the new `Market`/implementation). Before: `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `Market` address, fee recipient (`FEE_TO` in `script/Deploy.s.sol`) |
+| `NFTBid` | Not yet deployed with the settable fee (address moves likewise). Before: `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `Market` address, fee recipient |
+| `FillVerifier` (optional) | Unchanged: `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` | none |
 
 Example, deployed separately (`forge script script/Deploy.s.sol --sig "examples()"`), not part of the supported release:
 
@@ -39,7 +39,7 @@ Estimated by `forge script` against mainnet state (`--rpc-url https://mainnet.ga
 | `Deploy.s.sol` | Market, implementation, NFTSale, NFTBid, FillVerifier | 3,682,037 (45% less) |
 | `Deploy.s.sol --sig "examples()"` | PaintAction | 424,083 |
 
-On a chain where `Market` and `FillVerifier` already exist (Sepolia today), the script skips them; the Sepolia fork rehearsal estimated 2,149,943 gas for `NFTSale` and `NFTBid`.
+These figures predate this revision (D305 to D308), which enlarged `Market` and both handlers; re-estimate with `forge script` at the release candidate. On Sepolia, only `FillVerifier` can now be reused: `Market`'s address changed with D306, so the script will redeploy `Market`, the implementation, `NFTSale` and `NFTBid`, and skip only `FillVerifier`.
 
 ## Scripts
 
@@ -76,7 +76,7 @@ script/rehearse.sh https://mainnet.gateway.tenderly.co
 
 Prerequisites: a `main` checkout (`git checkout main && git pull --ff-only`), the `ripe0x` keystore holding at least 0.05 Sepolia ETH, and `ETHERSCAN_API_KEY` for Etherscan verification (Etherscan's v2 key works for Sepolia).
 
-1. Deploy and verify the supported release (Market and FillVerifier are skipped where they exist), then the example:
+1. Deploy and verify the supported release (only `FillVerifier` is skipped where it exists; after D306 `Market` and the handlers get new addresses and are redeployed), then the example:
 
    ```bash
    forge script script/Deploy.s.sol --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --verify --slow --gas-estimate-multiplier 1500

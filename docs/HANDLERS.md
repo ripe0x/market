@@ -130,8 +130,8 @@ cast send $MARKET "create(address,bytes,bytes32)" $NFT_SALE $CONFIG $SALT
 ORDER=$(cast call $MARKET "orderAddress(address,address,bytes32,bytes32)(address)" $ME $NFT_SALE $(cast keccak $CONFIG) $SALT)
 cast send $NFT "transferFrom(address,address,uint256)" $ME $ORDER $ID
 
-# Anyone: quote, then fill (input: recipient, maxPrice)
-PRICE=$(cast call $NFT_SALE "quote($SALE_T)(uint256,address,uint256,uint256)" "$TERMS" | head -1 | awk '{print $1}')
+# Anyone: quote, then fill (input: recipient, maxPrice). quote takes the order, which dates its fee rate
+PRICE=$(cast call $NFT_SALE "quote(address,$SALE_T)(uint256,address,uint256,uint256)" $ORDER "$TERMS" | head -1 | awk '{print $1}')
 cast send $ORDER "fill(bytes,bytes)" $CONFIG $(cast abi-encode "f(address,uint256)" $BUYER $PRICE) --value $PRICE
 
 # Seller, instead of a sale: cancel and recover
@@ -139,7 +139,7 @@ cast send $ORDER "close()"
 cast send $ORDER "execute(address,uint256,bytes)" $NFT 0 $(cast calldata "transferFrom(address,address,uint256)" $ORDER $ME $ID)
 ```
 
-The create, escrow, quote and fill steps above were run as written against a local anvil deployment (2026-11-06).
+The create, escrow and fill steps above were run against a local anvil deployment (2026-11-06). That run predates D307, so the `quote` call here has been updated to the current signature, which takes the order address, and was not re-run as shown.
 
 Fill inputs are always `abi.encode` of the handler's documented tuple. The full flow in Solidity, including a persistent bid and the PaintAction example, is [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol); [`script/rehearse.sh`](../script/rehearse.sh) runs it on a fork.
 

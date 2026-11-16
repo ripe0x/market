@@ -1,6 +1,6 @@
 # NFT trading handlers
 
-`NFTSale` and `NFTBid` are the reference handlers for trading ERC721s for native ETH on Market. They are ordinary handlers: no core change, no registry. Each charges a fixed 0.5% fee per fill (below); Market itself takes nothing. Any number of orders can use one deployment of each, each with its own configuration.
+`NFTSale` and `NFTBid` are the reference handlers for trading ERC721s for native ETH on Market. They are ordinary handlers: no registry. Each charges a fee of up to 1% per fill, set per order when the order is created (below); Market itself takes nothing, and now records each order's creation time so the handler can date its rate (D306). Any number of orders can use one deployment of each, each with its own configuration.
 
 > **Status: experimental, unaudited.** Tested with unit, fuzz, invariant and mainnet fork tests (see [STATUS.md](STATUS.md)). That is evidence about tested behaviour, not a safety claim.
 
@@ -16,17 +16,21 @@
 The same in both handlers:
 
 1. **`price`** is everything the buyer spends. Nothing is added on top.
-2. **`royalty`** is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, paid out of `price` to the collection's receiver in the same transaction.
-3. **`fee`** is 0.5% of `price` (`FEE_BPS = 50`, rounded down, so prices under 200 wei pay none), paid out of `price` to `feeTo`. Both are fixed when the handler is deployed; nobody can change them (D305).
-4. **`proceeds = price - royalty - fee`** go to the seller.
+2. **`fee`** is the order's fee rate of `price`, rounded down, paid out of `price` to `feeTo`. The rate is in basis points, at most `MAX_FEE_BPS` (100, i.e. 1%), so prices under 100 wei pay no fee. Each order keeps the rate in force when `Market` created it; see "The fee" below (D305, D307).
+3. **`royalty`** is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, capped at `price - fee`, paid out of `price` to the collection's receiver in the same transaction.
+4. **`proceeds = price - fee - royalty`** go to the seller.
 
 Royalty rules:
 
 1. A collection that reports ERC2981 through ERC165 (`supportsInterface(0x2a55205a)`) is always paid. A collection that does not report it pays nothing, even if it has a `royaltyInfo` function. The ERC165 query gets 30,000 gas, as ERC165 specifies (OpenZeppelin `ERC165Checker`); a collection whose `supportsInterface` needs more is treated as not reporting.
-2. A royalty is never skipped. The fill reverts if `royaltyInfo` reverts, asks more than `price` less the fee, asks a nonzero amount with no receiver, or the receiver refuses the ETH.
-3. A sale's seller caps the royalty share with `maxRoyaltyBps`; above it the sale reverts rather than pay the seller less than agreed. A bid's seller is protected by `minProceeds`, which is net of royalty and fee.
+2. The royalty is capped at `price - fee` (D308). A collection asking more is paid exactly `price - fee`, leaving the seller nothing, and the fill still settles. It is never silently dropped to zero. The fill reverts only if `royaltyInfo` reverts, a nonzero royalty names no receiver, or the receiver refuses the ETH.
+3. A sale's seller caps the royalty share with `maxRoyaltyBps`, checked against the capped royalty; above it the sale reverts rather than pay the seller less than agreed. A bid's seller is protected by `minProceeds`, which is net of fee and royalty.
 
-There are no other fees. A `feeTo` that refuses ETH would stop every fill of that deployment; nothing would be lost, and owners would close and recover. Applications that want a split can pay `proceedsTo` into a splitter.
+## The fee
+
+The handler starts at 1% (`MAX_FEE_BPS = 100`). `feeTo`, the fixed recipient, alone can call `setFee(uint16 bps)` to change the rate for orders created from the next second on; it reverts above `MAX_FEE_BPS`. Each order pays the rate in force when `Market` created it (`feeBpsOf(order)`, dated by `Market.createdAt`); an order that `Market` did not create (a hand-made clone) pays the latest rate. `feeBps()` is the rate new orders would get. The recipient never changes.
+
+There are no other fees. A `feeTo` that refuses ETH would stop every fill of that deployment; nothing would be lost, and owners would close and recover. A compromised `feeTo` can at most set 1% on new orders and keep refusing ETH; it cannot touch orders already created. Applications that want a split can pay `proceedsTo` into a splitter.
 
 ## Price schedule
 
@@ -59,17 +63,17 @@ Rounding: the movement between the end points rounds down, so the price is never
 | --- | --- |
 | `nft`, `tokenId` | The token for sale |
 | `schedule` | Price schedule and fill window |
-| `proceedsTo` | Receives `price - royalty - fee`. Must not be zero |
-| `maxRoyaltyBps` | Highest royalty share the seller accepts, in basis points of `price` |
+| `proceedsTo` | Receives `price - fee - royalty`. Must not be zero |
+| `maxRoyaltyBps` | Highest royalty share the seller accepts, in basis points of `price`, checked against the capped royalty |
 
 **Input** (`abi.encode(address recipient, uint256 maxPrice)`): `recipient` receives the token; the fill reverts if the current price is above `maxPrice`. Send at least the price as ETH; the excess returns to the caller.
 
-**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill (`NotAFill`), check config and window, compute price and royalty, check `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay the fee, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty, fee)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
+**Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill (`NotAFill`), check config and window, compute price, fee and capped royalty, check `maxRoyaltyBps`, `maxPrice` and payment, close the order, transfer the token with `transferFrom` and check `ownerOf(tokenId) == recipient`, pay the royalty, pay the fee, pay `proceedsTo`, refund the caller. Returns `abi.encode(price, royalty, fee)`. Emits `Sold(order, buyer, recipient, price, royalty)`.
 
 **Lifecycle:**
 
 1. Seller: `market.create(nftSale, config, salt)`, then `nft.transferFrom(seller, order, tokenId)`. Or transfer to `market.orderAddress(seller, nftSale, keccak256(config), salt)` first and create after; the address has no code until then, so `safeTransferFrom` makes no callback.
-2. Buyer: `sale.quote(config)` for `(price, royaltyTo, royalty, fee)`, then `order.fill{value: price}(config, abi.encode(recipient, price))`.
+2. Buyer: `sale.quote(order, config)` for `(price, royaltyTo, royalty, fee)` (the order dates the fee rate), then `order.fill{value: price}(config, abi.encode(recipient, price))`.
 3. Cancel: `order.close()`, then `order.execute(nft, 0, transferFrom(order, seller, tokenId))`. Stray ETH: `order.execute(seller, amount, "")`.
 
 The order holds no approvals, so nothing remains to revoke after a sale or cancellation.
@@ -90,14 +94,14 @@ The order holds no approvals, so nothing remains to revoke after a sale or cance
 
 **Seller's approval goes to the handler, not the order.** The holder calls `nft.approve(nftBid, tokenId)` or `nft.setApprovalForAll(nftBid, true)`. See "Why the bid handler holds the approval" below.
 
-**Input** (`abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`): the token to sell, the least `price - royalty - fee` the seller accepts, and where to send it (not zero).
+**Input** (`abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`): the token to sell, the least `price - fee - royalty` the seller accepts, and where to send it (not zero).
 
 **Fill**, in order: refuse unless called by a genuine order bound to this handler during its fill, refuse ETH, check token eligibility, window and funds, compute price and royalty, check `minProceeds`, count the fill and close if it is the last, move the token from the caller to `recipient` and check `ownerOf`, pay the royalty, pay the fee, pay `proceedsTo`. Returns `abi.encode(price, royalty, fee)`. Emits `Bought(order, seller, tokenId, price, royalty)`. `fills(order)` counts tokens bought.
 
 **Lifecycle:**
 
 1. Bidder: `market.create{value: funds}(nftBid, config, salt)`.
-2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty, fee)`; `order.fill(config, abi.encode(tokenId, price - royalty - fee, me))`.
+2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty, fee)`; `order.fill(config, abi.encode(tokenId, price - fee - royalty, me))`.
 3. Cancel: `order.close()`, then `order.execute(bidder, address(order).balance, "")`.
 
 ### Both handlers act only inside a genuine fill
@@ -129,7 +133,7 @@ What follows:
 ## Security assumptions
 
 1. **The collection is honest.** Delivery is checked with `ownerOf` before and after the transfer; a collection that lies in `ownerOf` can fake delivery. Buyers and bidders choose the collection and must trust it.
-2. **Royalty receivers can block fills.** A receiver that reverts or runs out of gas makes every fill of that collection revert until the collection changes it. This is deliberate: a royalty is never skipped.
+2. **Royalty receivers can block fills.** A receiver that reverts or runs out of gas makes every fill of that collection revert until the collection changes it. This is deliberate: a royalty that can be paid is never silently dropped. A royalty larger than `price - fee` is a different case: it is capped at `price - fee` and the fill settles (D308).
 3. **`proceedsTo`, `recipient` and refunds are pushed.** A sale whose `proceedsTo` rejects ETH cannot fill; the seller recovers by closing. A buyer whose account rejects the refund makes only its own fill revert.
 4. **No callbacks to recipients.** Tokens move with `transferFrom`. A contract recipient that cannot handle ERC721s will hold the token anyway; the account choosing `recipient` is responsible.
 5. **Reentrancy.** Each handler closes or counts before any external call. A royalty receiver, refund recipient or collection that calls back can fill other orders (nested fills stay available) but cannot refill the same order (`Order` refuses with `Reentrant`, then `OrderClosed`). Neither handler keeps state that one order's fill could corrupt for another.
@@ -159,17 +163,17 @@ Not covered: ERC1155, ERC20 payment, criteria other than one token or a whole co
 
 ## Gas
 
-Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account). The fee recipient is an existing account; paying the fee adds about 12,000 gas per fill.
+Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account). The fee recipient is an existing account; paying the fee adds about 12,000 gas per fill, and recording the creation time adds about 22,000 to each create (D306). An order created before a later rate change pays one extra storage read per change at fill time.
 
 | Operation | Gas |
 | --- | --- |
-| Create a listing | 95,227 |
-| Deposit the token into the listing | 67,026 (Azuki) to 110,175 (BAYC) |
-| Create a funded bid | 95,618 |
-| Sale fill, no royalty | 177,244 (Azuki) to 231,637 (BAYC) |
-| Sale fill with royalty | 197,717 (Moonbirds 1%) to 224,488 (Chimpers 5.5%, splitter) |
-| Bid fill, no royalty | 144,525 (Azuki) to 199,239 (BAYC) |
-| Bid fill with royalty | 177,535 (Opepen 2.5%) to 186,579 (Chimpers) |
+| Create a listing | 117,414 |
+| Deposit the token into the listing | 67,026 (Azuki) to 110,187 (BAYC) |
+| Create a funded bid | 117,805 |
+| Sale fill, no royalty | 182,237 (Azuki) to 236,630 (BAYC) |
+| Sale fill with royalty | 202,594 (Moonbirds 1%) to 229,365 (Chimpers 5.5%, splitter) |
+| Bid fill, no royalty | 149,358 (Azuki) to 204,072 (BAYC) |
+| Bid fill with royalty | 182,252 (Opepen 2.5%) to 191,296 (Chimpers) |
 | Close | 47,129 |
 | Recover the NFT from a closed sale | 54,705 |
 | Recover the ETH from a closed bid | 34,685 |
@@ -185,8 +189,8 @@ Seaport 1.6 fills of single orders sent directly to Seaport in mainnet blocks 26
 
 What the numbers mean:
 
-1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: a bit above its most efficient basic path, near the median of advanced orders. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, the genuine-fill check (about 2,500) and the fee transfer (about 12,000). Seaport's own fee, where a marketplace adds one, is an extra transfer too.
-2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (95,227) plus a transaction moving the token into escrow (67,026 to 110,175), about 162,000 to 205,000 in all; a Market bid costs one create with its ETH (95,618). At 1 gwei that is about 0.0001 to 0.0002 ETH per order.
+1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: around the median of advanced orders, with a no-royalty BAYC sale near its top. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, the genuine-fill check (about 2,500), the fee rate lookup and the fee transfer (about 12,000). Seaport's own fee, where a marketplace adds one, is an extra transfer too.
+2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (117,414) plus a transaction moving the token into escrow (67,026 to 110,187), about 184,000 to 228,000 in all; a Market bid costs one create with its ETH (117,805). At 1 gwei that is about 0.0002 ETH per order. The create is about 22,000 higher than before D306, which records the creation time.
 3. **What the gas buys.** The order exists onchain with its funds or token escrowed, so it needs no offchain order book, cannot be filled after it is unfunded or the token has moved elsewhere, and can be discovered from `Market.Created` events alone. Seaport's offers are cheaper to place and can be over-subscribed against one WETH balance; a Market bid escrows exactly what it can spend.
 4. **Escrow tradeoff.** A listed NFT is in its order, not the seller's wallet. Other marketplaces will not show it as the seller's, and it cannot be listed elsewhere at the same time.
 
