@@ -4,22 +4,22 @@
 
 | Chain | Chain ID | Status |
 | --- | --- | --- |
-| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-10), but predating this revision. The `Market`, `NFTSale` and `NFTBid` on Sepolia predate the settable fee, the shared `FeeConfig` and the creation-time core change (D305 to D309). `Market`'s bytecode changed (D306) and the fee terms moved into a new `FeeConfig` (D309), so `Market`, `FeeConfig` (new), `NFTSale` and `NFTBid` must all be deployed; their addresses are predicted below. The fee admin and recipient are now set in `script/Deploy.s.sol`. `FillVerifier` and `PaintAction` are unchanged and keep their addresses. Contracts deployed on 2026-11-06 at other addresses are obsolete (see "Deployment record") |
+| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-16): the current release, with the shared `FeeConfig` (admin `0xCB43…17F9`, recipient `0xD4ba…7e72`, 1%), plus the unchanged `FillVerifier` and `PaintAction` example. The 2026-11-10 `Market`, `NFTSale` and `NFTBid` are superseded and kept in "Deployment record" for reference |
 | Ethereum mainnet | 1 | **Not deployed.** Simulated only. Needs the release checklist below and the owner's explicit approval |
 
 ## Addresses
 
 Every contract deploys through the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")` and has no owner. The address depends only on the bytecode (and constructor argument), so it is the same on every chain and anyone can deploy it. **Any change to a contract's Solidity source, including a comment, changes its metadata and therefore its address.** `forge script script/Deploy.s.sol` prints the current addresses without sending anything. If it prints addresses other than the tables below for unchanged code, stop: the build differs. `foundry.toml` fixes the remappings (`auto_detect_remappings = false`) because they are part of the metadata; before that fix, a checkout with OpenZeppelin's nested submodules (`git submodule update --recursive`) compiled to different bytecode and addresses (found 2026-11-10).
 
-Supported release (`forge script script/Deploy.s.sol`). The creation-time core change (D306) altered `Market`'s bytecode and the fee terms moved into a new `FeeConfig` (D309), so `Market`, the `Order` implementation it creates, `FeeConfig`, and the two handlers that now take `FeeConfig` all deploy to new addresses; none is deployed anywhere yet. The addresses below are the planned CREATE2 addresses (salt `keccak256("market.v1")`, the same on every chain) for the current source and the fee admin and recipient set in `script/Deploy.s.sol`. Run `forge script script/Deploy.s.sol` to print them before deploying and stop if they differ. The pre-revision Sepolia addresses are kept for reference only.
+Supported release (`forge script script/Deploy.s.sol`). The creation-time core change (D306) altered `Market`'s bytecode and the fee terms moved into a new `FeeConfig` (D309), so `Market`, the `Order` implementation it creates, `FeeConfig`, and the two handlers that now take `FeeConfig` all have new addresses. They are deployed on Sepolia (2026-11-16) and nowhere else. The addresses depend on the fee admin and recipient set in `script/Deploy.s.sol`; run `forge script script/Deploy.s.sol` to print them before deploying and stop if they differ. The pre-revision Sepolia addresses are kept for reference only.
 
 | Contract | Address | Constructor |
 | --- | --- | --- |
-| `Market` | Planned (CREATE2): `0x7c91e34703ae3E32812bad1f7251CD0976A31FD4`. Not yet deployed. Before D306: `0x8210144750E6237740bf71b819f87A834905445d` | none |
-| `Order` implementation (created by Market) | Changes with `Market`'s address; not yet deployed. Before: `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87` | none |
-| `FeeConfig` | Planned (CREATE2): `0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF`. New contract, not yet deployed | `Market` address, `FEE_ADMIN`, `FEE_TO` (in `script/Deploy.s.sol`) |
-| `NFTSale` | Planned (CREATE2): `0xfEf3a72600a453F82650343525751811120da2c8`. Not yet deployed. Before: `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `FeeConfig` address |
-| `NFTBid` | Planned (CREATE2): `0x8dbB30441bB0ca607bC17A3ea763C8f66B30017E`. Not yet deployed. Before: `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `FeeConfig` address |
+| `Market` | `0x7c91e34703ae3E32812bad1f7251CD0976A31FD4`. Before D306: `0x8210144750E6237740bf71b819f87A834905445d` | none |
+| `Order` implementation (created by Market) | `0x1c8Af1349Fa2b41903291675DCf5e9dfc2A8fB83`. Before: `0xB11Fb472aC4DCd74296A18b82195B2127A7e0f87` | none |
+| `FeeConfig` | `0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF` | `Market` address, `FEE_ADMIN`, `FEE_TO` (in `script/Deploy.s.sol`) |
+| `NFTSale` | `0xfEf3a72600a453F82650343525751811120da2c8`. Before: `0x72649226f648d8a33f8eee78B71e5D9d9e18D9C7` | `FeeConfig` address |
+| `NFTBid` | `0x8dbB30441bB0ca607bC17A3ea763C8f66B30017E`. Before: `0x0FeE65df72d3194b07235D275b60269E15FC1445` | `FeeConfig` address |
 | `FillVerifier` (optional) | Unchanged: `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` | none |
 
 Example, deployed separately (`forge script script/Deploy.s.sol --sig "examples()"`), not part of the supported release:
@@ -150,6 +150,41 @@ Signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, the owner's account (confir
 | 12,078,308 to 12,078,313 | 5837 to 5842 | `0x63c8e131…89d6`, `0xcb9dd00e…b678`, `0xd4f1f978…c9bd`, `0x765389ab…9ea0`, `0x2c3e5ef6…e787`, `0x2c82fcd3…1573` | Success | 2,729,820 to 567,402 | old `PaintAction`, `DutchAuction`, `TokenExchange`, `AcquisitionBid`, `RisingStrategy`, `CapitalShareStrategy` (all obsolete; the last four removed in D301) |
 
 No lifecycle transactions followed from this account. The obsolete contracts cannot be removed; they have no owner and hold nothing, but `TokenExchange` and `AcquisitionBid` keep the approval-to-order pattern (A1). Do not use any address in this section except `Market`, the implementation and `FillVerifier`.
+
+### Fee release, Sepolia, 2026-11-16
+
+Deployed from code identical to `main` at `d6b2073` (the merge of PR #13): the owner ran the broadcast from the `feat/settable-fee` worktree at `58d83a2`, whose `src`, `handlers`, `periphery`, `script` and `foundry.toml` have no diff from `main`, and every address matched the dry run from `main`. Signer `ripe0x` (`0xCB43…17F9`), `https://sepolia.gateway.tenderly.co`, one broadcast of 4 transactions, 21,064,711 gas at about 0.51 gwei, 0.000000010760487326 ETH. `FillVerifier` was already deployed and skipped.
+
+| Contract | Address | Transaction | Block | Gas | Verified |
+| --- | --- | --- | --- | --- | --- |
+| `Market` | `0x7c91e34703ae3E32812bad1f7251CD0976A31FD4` | [`0x387a6ddc…`](https://evm.now/tx/0x387a6ddc8ccc24f117796329a534f90b6cd88ac23b35366efba256dba614ae47?chainId=11155111) | 12,150,229 | 5,810,324 | Etherscan, Sourcify |
+| `Order` implementation | `0x1c8Af1349Fa2b41903291675DCf5e9dfc2A8fB83` | same | 12,150,229 | | Etherscan, Sourcify |
+| `FeeConfig` | `0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF` | [`0xbc6b2ed1…`](https://evm.now/tx/0xbc6b2ed1ff5e3b668de461c4ac2b3fe2e989a22cf750af2dc49fe421d376e931?chainId=11155111) | 12,150,230 | 3,606,867 | Etherscan, Sourcify |
+| `NFTSale` | `0xfEf3a72600a453F82650343525751811120da2c8` | [`0x02a1f378…`](https://evm.now/tx/0x02a1f378eec3387e7dccff2f8e17804ff66d5f640f731243af8a8ebd53f3a4f2?chainId=11155111) | 12,150,232 | 5,670,451 | Etherscan, Sourcify |
+| `NFTBid` | `0x8dbB30441bB0ca607bC17A3ea763C8f66B30017E` | [`0x414e1052…`](https://evm.now/tx/0x414e105255574c52be75a10200566391654649ee86223d7f257b0d5a146cb018?chainId=11155111) | 12,150,233 | 5,977,069 | Etherscan, Sourcify |
+
+Read back after the broadcast: runtime sizes 1,359, 2,133, 1,902, 3,520 and 3,718 bytes; `Market.implementation()` is the `Order` above; `FeeConfig` admin `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, no pending admin, recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72`, `feeBps` 100, `MAX_FEE_BPS` 100, `market` the `Market` above; both handlers' `fees()` is this `FeeConfig`. Sourcify: exact match for all five. Etherscan: four verified in the broadcast; `NFTSale` failed because Etherscan had not indexed it yet and passed on a `forge verify-contract` rerun. `test/fork/SepoliaLive.t.sol` pins block 12,150,234 and runs against these contracts (STATUS.md).
+
+### Arena on the fee release, Sepolia, 2026-11-16
+
+`script/Arena.s.sol` (code identical to `main` at `d6b2073`), arena id 2, start `1794868140`, signer `ripe0x` (`0xCB43…17F9`), Tenderly gateway, each step dry-run first and read back after. Sale order `0xf1eD6996380e0875D8Fa6dC42922178B9081B41c`, bid order `0x5052eD8e7A5274573a73b68b27b42A36abf556a6`; `FeeConfig` locked both at 1%. All 31 transactions succeeded, 28,213,907 gas.
+
+| Broadcast | Nonces | Blocks | Gas | Result |
+| --- | --- | --- | --- | --- |
+| `setup` | 5905 to 5923 | 12,150,281 to 12,150,299 | 26,168,376 | Parties, collection (5% royalty), matcher, adversary; falling sale and funded rising bid (0.012 ETH, 2 fills) |
+| `attack` | 5924 | 12,150,315 | 691,002 | [`0x2600f8c6…`](https://evm.now/tx/0x2600f8c60f986b02f667113f513abc626067ccbb39e843d44297f65d4a616bb0?chainId=11155111): the same 15 attacks as the 2026-11-10 arena, all refused with the same errors (`NotAFill` ×4, `ERC721IncorrectOwner` ×2, `Unauthorized` ×6, `WrongConfig`, `Underpaid`, `OrderClosed`, `ERC721InsufficientApproval`) |
+| `settle` | 5925, 5926 | 12,150,385, 12,150,386 | 1,044,305 | [`0xe0eb49e7…`](https://evm.now/tx/0xe0eb49e7a02adcd8277b4446a25955c5319bd36da83768a701ac514f8b2dfcbe?chainId=11155111): matcher buys token 1 from the sale and sells it into the bid; [`0xeb5354a4…`](https://evm.now/tx/0xeb5354a4d8c98eb4abab232f1092815a563eb87d2082b6223886c7094d0e5241?chainId=11155111): holder sells token 2 into the bid, its last fill, which closes it |
+| `cleanup` | 5927 to 5935 | 12,150,430 to 12,150,438 | 310,224 | Closed bid's owner tries `transferFrom(holder, …)` (`ERC721InsufficientApproval`) and `NFTBid.onFill` (`NotAFill`), both refused; holder revokes; bid recovered; every party returns its ETH |
+
+Payouts from the `Sold` and `Bought` events, in ETH:
+
+| Trade | Price | Royalty 5% | Fee 1% | Seller |
+| --- | --- | --- | --- | --- |
+| Sale, token 1 to the matcher | 0.00358 | 0.000179 | 0.0000358 | 0.0033652 |
+| Bid, token 1 from the matcher | 0.004853333333333333 | 0.000242666666666666 | 0.000048533333333333 | 0.004562133333333334 |
+| Bid, token 2 from the holder | 0.00488 | 0.000244 | 0.0000488 | 0.0045872 |
+
+Read back after cleanup: every arena contract and both orders hold 0 ETH. The fee recipient `0xD4ba…7e72` went from 0 to 0.000133133333333333 ETH, exactly the three fees. The signer's balance fell by 0.001184529648727723 ETH: that fee plus 0.00105139631539439 of gas (settle was sent at 1 gwei). The matcher kept 0.000982133333333334 of spread before sweeping it back.
 
 ### This release, Sepolia, 2026-11-10
 
