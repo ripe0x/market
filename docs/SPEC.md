@@ -36,7 +36,7 @@ event Created(Order indexed order, address indexed owner, IOrderHandler indexed 
 
 `implementation` is `new Order()`, created in Market's constructor. Market has no function that changes it.
 
-`createdAt[order]` is the timestamp of the block in which `create` deployed `order`, and 0 for any account Market did not deploy. A handler can read it to apply the terms in force when an order was created; the reference `NFTTrade` uses it to date each order's fee rate (D306, D307). Market stores it and nothing else about the order; it still takes no fee and has no owner or admin.
+`createdAt[order]` is the timestamp of the block in which `create` deployed `order`, and 0 for any account Market did not deploy. A handler can read it to apply the terms in force when an order was created; the reference handlers' shared `FeeConfig` uses it to date each order's fee rate (D306, D307, D309). Market stores it and nothing else about the order; it still takes no fee and has no owner or admin.
 
 `create`:
 

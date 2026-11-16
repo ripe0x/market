@@ -94,7 +94,8 @@ These are different and should not be confused:
 | --- | --- | --- |
 | [`NFTSale`](handlers/NFTSale.sol) | Supported handler | Sell one escrowed ERC721 for ETH at a fixed, falling or rising price. Buyer sets a max price; seller caps the royalty share. |
 | [`NFTBid`](handlers/NFTBid.sol) | Supported handler | Funded bid for one token or up to `maxFills` tokens of a collection, at a fixed, rising or falling price. Holders approve the handler; seller sets minimum proceeds. |
-| [`NFTTrade`](handlers/NFTTrade.sol), [`HandlerBase`](handlers/HandlerBase.sol) | Shared bases | Fill authentication, linear price schedule, ERC2981 royalties (paid atomically, capped at price less fee), the settable up-to-1% fee, `ownerOf` delivery check; `execute` helpers. |
+| [`NFTTrade`](handlers/NFTTrade.sol), [`HandlerBase`](handlers/HandlerBase.sol) | Shared bases | Fill authentication, linear price schedule, ERC2981 royalties (paid atomically, capped at price less fee), the up-to-1% fee read from `FeeConfig`, `ownerOf` delivery check; `execute` helpers. |
+| [`FeeConfig`](handlers/FeeConfig.sol) | Shared fee terms | The recipient and rate both NFT handlers read on each fill. A separate admin sets the rate (at most 1%, locked per order at creation) and the changeable recipient. Market never calls it. |
 | [`FillVerifier`](periphery/FillVerifier.sol) | Optional periphery | Lets a batching wallet revert its own fill unless it received what it expected. Market never calls it. |
 | [`PaintAction`](examples/PaintAction.sol) + [`Artwork`](examples/Artwork.sol) | Example | A non-trading handler: sells one repaint of an artwork using a painter role the artwork contract grants the order, then resigns the role and closes. |
 
@@ -139,7 +140,7 @@ Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tender
 
 ```
 src/        Market.sol, Order.sol (with IOrderHandler): the core
-handlers/   NFTSale, NFTBid and their bases NFTTrade, HandlerBase
+handlers/   NFTSale, NFTBid, their bases NFTTrade, HandlerBase, and the shared FeeConfig
 periphery/  FillVerifier.sol (optional)
 examples/   PaintAction + Artwork
 test/       unit, fuzz, invariant, composition, review PoCs and gas; test/fork: mainnet fork
