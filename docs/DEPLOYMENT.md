@@ -165,6 +165,27 @@ Deployed from code identical to `main` at `d6b2073` (the merge of PR #13): the o
 
 Read back after the broadcast: runtime sizes 1,359, 2,133, 1,902, 3,520 and 3,718 bytes; `Market.implementation()` is the `Order` above; `FeeConfig` admin `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, no pending admin, recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72`, `feeBps` 100, `MAX_FEE_BPS` 100, `market` the `Market` above; both handlers' `fees()` is this `FeeConfig`. Sourcify: exact match for all five. Etherscan: four verified in the broadcast; `NFTSale` failed because Etherscan had not indexed it yet and passed on a `forge verify-contract` rerun. `test/fork/SepoliaLive.t.sol` pins block 12,150,234 and runs against these contracts (STATUS.md).
 
+### Arena on the fee release, Sepolia, 2026-11-16
+
+`script/Arena.s.sol` (code identical to `main` at `d6b2073`), arena id 2, start `1794868140`, signer `ripe0x` (`0xCB43…17F9`), Tenderly gateway, each step dry-run first and read back after. Sale order `0xf1eD6996380e0875D8Fa6dC42922178B9081B41c`, bid order `0x5052eD8e7A5274573a73b68b27b42A36abf556a6`; `FeeConfig` locked both at 1%. All 31 transactions succeeded, 28,213,907 gas.
+
+| Broadcast | Nonces | Blocks | Gas | Result |
+| --- | --- | --- | --- | --- |
+| `setup` | 5905 to 5923 | 12,150,281 to 12,150,299 | 26,168,376 | Parties, collection (5% royalty), matcher, adversary; falling sale and funded rising bid (0.012 ETH, 2 fills) |
+| `attack` | 5924 | 12,150,315 | 691,002 | [`0x2600f8c6…`](https://evm.now/tx/0x2600f8c60f986b02f667113f513abc626067ccbb39e843d44297f65d4a616bb0?chainId=11155111): the same 15 attacks as the 2026-11-10 arena, all refused with the same errors (`NotAFill` ×4, `ERC721IncorrectOwner` ×2, `Unauthorized` ×6, `WrongConfig`, `Underpaid`, `OrderClosed`, `ERC721InsufficientApproval`) |
+| `settle` | 5925, 5926 | 12,150,385, 12,150,386 | 1,044,305 | [`0xe0eb49e7…`](https://evm.now/tx/0xe0eb49e7a02adcd8277b4446a25955c5319bd36da83768a701ac514f8b2dfcbe?chainId=11155111): matcher buys token 1 from the sale and sells it into the bid; [`0xeb5354a4…`](https://evm.now/tx/0xeb5354a4d8c98eb4abab232f1092815a563eb87d2082b6223886c7094d0e5241?chainId=11155111): holder sells token 2 into the bid, its last fill, which closes it |
+| `cleanup` | 5927 to 5935 | 12,150,430 to 12,150,438 | 310,224 | Closed bid's owner tries `transferFrom(holder, …)` (`ERC721InsufficientApproval`) and `NFTBid.onFill` (`NotAFill`), both refused; holder revokes; bid recovered; every party returns its ETH |
+
+Payouts from the `Sold` and `Bought` events, in ETH:
+
+| Trade | Price | Royalty 5% | Fee 1% | Seller |
+| --- | --- | --- | --- | --- |
+| Sale, token 1 to the matcher | 0.00358 | 0.000179 | 0.0000358 | 0.0033652 |
+| Bid, token 1 from the matcher | 0.004853333333333333 | 0.000242666666666666 | 0.000048533333333333 | 0.004562133333333334 |
+| Bid, token 2 from the holder | 0.00488 | 0.000244 | 0.0000488 | 0.0045872 |
+
+Read back after cleanup: every arena contract and both orders hold 0 ETH. The fee recipient `0xD4ba…7e72` went from 0 to 0.000133133333333333 ETH, exactly the three fees. The signer's balance fell by 0.001184529648727723 ETH: that fee plus 0.00105139631539439 of gas (settle was sent at 1 gwei). The matcher kept 0.000982133333333334 of spread before sweeping it back.
+
 ### This release, Sepolia, 2026-11-10
 
 Deployed from `main` at `865829a` (contract code identical to `v0.1.0-rc.1`) with the `ripe0x` keystore (`0xCB43…17F9`) through `https://sepolia.gateway.tenderly.co`, one confirmed broadcast at a time, each dry-run first and read back after. Gas price about 67 wei, so the whole sequence cost about 0.000000002 ETH in gas; the account's only real spend was 0.000300611 ETH of royalties to the lifecycle's fixed receiver.
