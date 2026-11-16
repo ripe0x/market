@@ -18,7 +18,7 @@ import {NFTTrade} from "./NFTTrade.sol";
 ///
 /// Seller's limits: the schedule, and `maxRoyaltyBps`. If the collection's royalty is more than
 /// that share of the price, the fill reverts instead of paying the seller less than agreed.
-/// Proceeds go to `proceedsTo`.
+/// Proceeds, `price - royalty - fee`, go to `proceedsTo`.
 ///
 /// To cancel, the owner calls `Order.close` and then takes the token and any ETH back through
 /// `Order.execute`. The order holds no allowance, so closing revokes nothing.
@@ -37,7 +37,7 @@ contract NFTSale is NFTTrade {
     error Underpaid(uint256 price, uint256 value);
     error RoyaltyAboveLimit(uint256 royalty, uint256 limit);
 
-    constructor(Market market) NFTTrade(market) {}
+    constructor(Market market, address feeTo_) NFTTrade(market, feeTo_) {}
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
@@ -47,7 +47,7 @@ contract NFTSale is NFTTrade {
         _requireFill();
         Config memory c = abi.decode(config, (Config));
         (address recipient, uint256 maxPrice) = abi.decode(input, (address, uint256));
-        (uint256 price, address royaltyTo, uint256 royalty) = quote(c);
+        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee) = quote(c);
         if (price > maxPrice) revert AboveMaxPrice(price, maxPrice);
         if (value < price) revert Underpaid(price, value);
 
@@ -55,10 +55,11 @@ contract NFTSale is NFTTrade {
         _close();
         _deliver(c.nft, msg.sender, recipient, c.tokenId);
         _sendETH(royaltyTo, royalty);
-        _sendETH(c.proceedsTo, price - royalty);
+        _sendETH(feeTo, fee);
+        _sendETH(c.proceedsTo, price - royalty - fee);
         _sendETH(caller, value - price);
         emit Sold(msg.sender, caller, recipient, price, royalty);
-        return abi.encode(price, royalty);
+        return abi.encode(price, royalty, fee);
     }
 
     /// @dev The order sends the token it holds.
@@ -68,11 +69,16 @@ contract NFTSale is NFTTrade {
 
     /// @notice What a fill would cost now and where the money would go; reverts when a fill
     /// would, except for the buyer's own limits and whether the order still holds the token.
-    function quote(Config memory c) public view returns (uint256 price, address royaltyTo, uint256 royalty) {
+    function quote(Config memory c)
+        public
+        view
+        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee)
+    {
         if (c.proceedsTo == address(0)) revert ZeroAddress();
         price = _currentPrice(c.schedule);
         (royaltyTo, royalty) = royaltyOf(c.nft, c.tokenId, price);
         uint256 limit = price * c.maxRoyaltyBps / 10_000;
         if (royalty > limit) revert RoyaltyAboveLimit(royalty, limit);
+        fee = feeOf(price);
     }
 }

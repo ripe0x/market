@@ -34,15 +34,21 @@ contract NFTForkTest is Test {
     address bidder = makeAddr("bidder");
     address vault = makeAddr("vault");
     address proceeds = makeAddr("proceeds");
+    // makeAddr keys are public, so common labels can hold code on mainnet ("treasury" does: an
+    // EIP-7702 delegate that forwards ETH). setUp asserts every actor here is a plain account.
+    address treasury = makeAddr("market fork fee recipient");
     uint256 salt;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://mainnet.gateway.tenderly.co")), BLOCK);
         market = new Market();
-        sale = new NFTSale(market);
-        bids = new NFTBid(market);
+        sale = new NFTSale(market, treasury);
+        bids = new NFTBid(market, treasury);
         vm.deal(buyer, 1000 ether);
         vm.deal(bidder, 1000 ether);
+        vm.deal(treasury, 1 ether); // an existing account, like the production Safe
+        address[5] memory actors = [buyer, bidder, vault, proceeds, treasury];
+        for (uint256 i; i < actors.length; ++i) assertEq(actors[i].code.length, 0, "actor has code on mainnet");
     }
 
     function _royalty(IERC721 nft, uint256 id, uint256 price) internal view returns (address to, uint256 amount) {
@@ -82,7 +88,7 @@ contract NFTForkTest is Test {
 
         assertEq(nft.ownerOf(id), buyer, "delivered");
         assertEq(buyerBefore - buyer.balance, price, "buyer pays the price");
-        assertEq(proceeds.balance, price - royalty, "seller proceeds");
+        assertEq(proceeds.balance, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
         assertEq(address(order).balance, 0);
         assertTrue(order.closed());
     }
@@ -102,11 +108,11 @@ contract NFTForkTest is Test {
         nft.setApprovalForAll(address(bids), true);
         if (royalty != 0) vm.expectCall(royaltyTo, royalty, "");
         vm.prank(holder);
-        order.fill(config, abi.encode(id, price - royalty, holder));
+        order.fill(config, abi.encode(id, price - royalty - price / 200, holder));
         vm.snapshotGasLastCall("NFTFork", string.concat("bid fill: ", label));
 
         assertEq(nft.ownerOf(id), vault, "delivered");
-        assertEq(holder.balance - holderBefore, price - royalty, "seller proceeds");
+        assertEq(holder.balance - holderBefore, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
         assertEq(address(order).balance, 4 ether, "bid keeps the rest");
         assertFalse(order.closed(), "one of two fills used");
     }
@@ -202,7 +208,7 @@ contract NFTForkTest is Test {
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
         assertEq(ENS.ownerOf(id), buyer);
-        assertEq(proceeds.balance, 1 ether);
+        assertEq(proceeds.balance, 0.995 ether, "1 less the 0.5% fee");
     }
 
     /// CryptoPunks predate ERC721: no `ownerOf` or `transferFrom`. Bids for them revert and

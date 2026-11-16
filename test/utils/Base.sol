@@ -21,14 +21,15 @@ abstract contract Base is Test {
     address buyer = makeAddr("buyer");
     address attacker = makeAddr("attacker");
     address royalty = makeAddr("royalty");
+    address treasury = makeAddr("treasury");
 
     uint256 salt;
 
     function setUp() public virtual {
         vm.warp(1_000_000);
         market = new Market();
-        sale = new NFTSale(market);
-        bids = new NFTBid(market);
+        sale = new NFTSale(market, treasury);
+        bids = new NFTBid(market, treasury);
         paint = new PaintAction();
         nft = new TestNFT();
         vm.deal(buyer, 100 ether);

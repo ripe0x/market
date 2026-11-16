@@ -106,7 +106,7 @@ contract Eip7702FillerTest is Base {
         calls[2] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(nft), myNfts, 1)));
         this.run(calls);
         assertEq(nft.ownerOf(7), eoa);
-        assertEq(seller.balance, 1 ether);
+        assertEq(seller.balance, 0.995 ether, "1 less the 0.5% fee");
     }
 
     /// Selling an NFT into an NFTBid: the wallet approves the handler and requires the ETH it
@@ -122,12 +122,12 @@ contract Eip7702FillerTest is Base {
         WalletBatch.Call[] memory calls = new WalletBatch.Call[](4);
         calls[0] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.snapshot, (address(verifier), myEth)));
         calls[1] = WalletBatch.Call(address(nft), 0, abi.encodeCall(IERC721.approve, (address(bids), 7)));
-        calls[2] = WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 1 ether, eoa))));
+        calls[2] = WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 0.995 ether, eoa))));
         calls[3] = WalletBatch.Call(
-            address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(verifier), myEth, 1 ether))
+            address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(verifier), myEth, 0.995 ether))
         );
         this.run(calls);
-        assertEq(eoa.balance, 1 ether);
+        assertEq(eoa.balance, 0.995 ether, "1 less the 0.5% fee");
         assertEq(nft.ownerOf(7), seller);
     }
 

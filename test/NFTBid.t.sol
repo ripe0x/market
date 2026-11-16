@@ -64,9 +64,10 @@ contract NFTBidTest is Base {
     function test_singleTokenBid() public {
         bytes memory config = _config(false, 3, _fixed(2 ether), 1);
         Order order = _bid(config, 2 ether);
-        _sell(order, config, 3, 1.9 ether);
+        _sell(order, config, 3, 1.89 ether);
         assertEq(art.ownerOf(3), vault);
-        assertEq(holder.balance, 1.9 ether);
+        assertEq(holder.balance, 1.89 ether, "2 less 5% royalty and 0.5% fee");
+        assertEq(treasury.balance, 0.01 ether);
         assertEq(royalty.balance, 0.1 ether);
         assertEq(address(order).balance, 0);
         assertTrue(order.closed());
@@ -84,12 +85,13 @@ contract NFTBidTest is Base {
         bytes memory config = _config(true, 0, s, 1);
         Order order = _bid(config, 3 ether);
         skip(500);
-        (uint256 price,, uint256 r) = bids.quote(address(order), abi.decode(config, (NFTBid.Config)), 1);
+        (uint256 price,, uint256 r, uint256 f) = bids.quote(address(order), abi.decode(config, (NFTBid.Config)), 1);
         assertEq(price, 2 ether);
-        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 1.9 ether, 2 ether));
+        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 1.89 ether, 2 ether));
         _sell(order, config, 1, 2 ether);
-        _sell(order, config, 1, price - r);
-        assertEq(holder.balance, 1.9 ether);
+        _sell(order, config, 1, price - r - f);
+        assertEq(holder.balance, 1.89 ether, "2 less 5% royalty and 0.5% fee");
+        assertEq(treasury.balance, 0.01 ether);
         assertEq(bidder.balance, 97 ether, "bidder spent only what it deposited");
     }
 
@@ -278,7 +280,7 @@ contract NFTBidTest is Base {
     }
 
     function testFuzz_bidSettlementConserves(uint96 price, uint16 bps, uint96 extraFunds) public {
-        bps = uint16(bound(bps, 0, 10_000));
+        bps = uint16(bound(bps, 0, 9_950)); // above 99.5% the royalty leaves less than the fee
         price = uint96(bound(price, 0, 50 ether));
         extraFunds = uint96(bound(extraFunds, 0, 40 ether));
         art.setRoyalty(royalty, bps);
@@ -287,8 +289,10 @@ contract NFTBidTest is Base {
         uint256 funded = address(order).balance;
         _sell(order, config, 1, 0);
         uint256 r = uint256(price) * bps / 10_000;
+        uint256 f = uint256(price) * 50 / 10_000;
         assertEq(royalty.balance, r);
-        assertEq(holder.balance, price - r);
+        assertEq(treasury.balance, f);
+        assertEq(holder.balance, price - r - f);
         assertEq(address(order).balance, funded - price);
         assertEq(address(bids).balance, 0);
     }

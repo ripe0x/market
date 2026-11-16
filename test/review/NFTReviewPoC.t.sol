@@ -165,9 +165,9 @@ contract NFTReviewPoC is Base {
     // underflow. Shown here for completeness.
     // -------------------------------------------------------------------------------------------
     function test_info_maxRoyaltyBpsAboveDenominatorIsHarmless() public {
-        NFTSale saleH = new NFTSale(market);
+        NFTSale saleH = new NFTSale(market, treasury);
         RoyaltyNFT c = new RoyaltyNFT();
-        c.setRoyalty(royalty, 10_000); // 100% royalty, the maximum royaltyOf allows
+        c.setRoyalty(royalty, 9_950); // 99.5% royalty, the maximum royaltyOf allows beside the 0.5% fee
         c.mint(seller, 1);
         NFTTrade.Schedule memory s =
             NFTTrade.Schedule(1 ether, 1 ether, block.timestamp, block.timestamp, 0);
@@ -179,8 +179,9 @@ contract NFTReviewPoC is Base {
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
 
-        assertEq(royalty.balance, 1 ether, "royalty capped at price, never above");
-        assertEq(seller.balance, 0, "proceeds are price - royalty = 0, no underflow");
+        assertEq(royalty.balance, 0.995 ether, "royalty capped at price less the fee, never above");
+        assertEq(treasury.balance, 0.005 ether, "fee still paid in full");
+        assertEq(seller.balance, 0, "proceeds are price - royalty - fee = 0, no underflow");
         assertEq(c.ownerOf(1), buyer);
     }
 }

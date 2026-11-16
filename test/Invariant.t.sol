@@ -14,8 +14,8 @@ import {RoyaltyNFT} from "./utils/Mocks.sol";
 /// theft attempts against both NFT handlers, with ghost accounting of every payment.
 contract Driver is Test {
     Market public market = new Market();
-    NFTSale public sale = new NFTSale(market);
-    NFTBid public bids = new NFTBid(market);
+    NFTSale public sale = new NFTSale(market, makeAddr("treasury"));
+    NFTBid public bids = new NFTBid(market, makeAddr("treasury"));
     RoyaltyNFT public art = new RoyaltyNFT();
 
     uint256 public constant TOKENS = 12;
@@ -42,6 +42,7 @@ contract Driver is Test {
 
     // Ghost accounting.
     uint256 public royaltiesOwed;
+    uint256 public feesOwed;
     mapping(address => uint256) public proceedsOwed;
     uint256 public bidIn; // funding and top-ups
     uint256 public bidOut; // prices paid
@@ -98,7 +99,7 @@ contract Driver is Test {
         if (listings.length == 0) return;
         Listing storage l = listings[index % listings.length];
         if (l.done) return;
-        (uint256 price,, uint256 r) = sale.quote(abi.decode(l.config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f) = sale.quote(abi.decode(l.config, (NFTSale.Config)));
         extra = bound(extra, 0, 1 ether);
         uint256 before = buyer.balance;
         vm.prank(buyer);
@@ -106,7 +107,8 @@ contract Driver is Test {
         assertEq(before - buyer.balance, price, "buyer pays the price");
         l.done = true;
         royaltiesOwed += r;
-        proceedsOwed[l.seller] += price - r;
+        feesOwed += f;
+        proceedsOwed[l.seller] += price - r - f;
     }
 
     function cancel(uint256 index) external {
@@ -128,11 +130,12 @@ contract Driver is Test {
         NFTBid.Config memory c = abi.decode(bidConfig, (NFTBid.Config));
         uint256 price = bids.priceAt(c.schedule, block.timestamp);
         if (address(bid).balance < price) return;
-        (, , uint256 r) = bids.quote(address(bid), c, id);
+        (,, uint256 r, uint256 f) = bids.quote(address(bid), c, id);
         vm.prank(seller);
-        bid.fill(bidConfig, abi.encode(id, price - r, seller));
+        bid.fill(bidConfig, abi.encode(id, price - r - f, seller));
         royaltiesOwed += r;
-        proceedsOwed[seller] += price - r;
+        feesOwed += f;
+        proceedsOwed[seller] += price - r - f;
         bidOut += price;
         bought += 1;
     }
@@ -251,6 +254,8 @@ contract InvariantTest is Test {
 
     function invariant_everyPaymentAccounted() public view {
         assertEq(d.royaltyTo().balance, d.royaltiesOwed(), "royalties");
+        assertEq(d.sale().feeTo(), d.bids().feeTo());
+        assertEq(d.sale().feeTo().balance, d.feesOwed(), "fees");
         for (uint256 i; i < 2; ++i) {
             address h = d.holders(i);
             assertEq(h.balance, d.proceedsOwed(h), "seller proceeds");
