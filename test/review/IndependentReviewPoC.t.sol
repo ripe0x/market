@@ -150,7 +150,7 @@ contract IndependentReviewPoC is Base {
         // proceeds would be 0.5 ETH; seller demands 0.9 -> revert.
         bytes memory input = abi.encode(id, uint256(0.9 ether), seller);
         vm.prank(seller);
-        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 0.495 ether, 0.9 ether));
+        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 0.49 ether, 0.9 ether));
         order.fill(config, input);
         assertEq(rnft.ownerOf(id), seller, "seller keeps token when underpaid");
     }
@@ -184,7 +184,7 @@ contract IndependentReviewPoC is Base {
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, input);
         assertEq(nft.ownerOf(1), buyer, "buyer got token");
-        assertEq(seller.balance, sellerBefore + 0.995 ether, "seller paid, less the 0.5% fee");
+        assertEq(seller.balance, sellerBefore + 0.99 ether, "seller paid, less the 1% fee");
         assertTrue(order.closed(), "single-use order closed");
     }
 }

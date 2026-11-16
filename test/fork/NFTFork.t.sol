@@ -88,7 +88,7 @@ contract NFTForkTest is Test {
 
         assertEq(nft.ownerOf(id), buyer, "delivered");
         assertEq(buyerBefore - buyer.balance, price, "buyer pays the price");
-        assertEq(proceeds.balance, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
+        assertEq(proceeds.balance, price - royalty - price / 100, "seller proceeds, less the 1% fee");
         assertEq(address(order).balance, 0);
         assertTrue(order.closed());
     }
@@ -108,11 +108,11 @@ contract NFTForkTest is Test {
         nft.setApprovalForAll(address(bids), true);
         if (royalty != 0) vm.expectCall(royaltyTo, royalty, "");
         vm.prank(holder);
-        order.fill(config, abi.encode(id, price - royalty - price / 200, holder));
+        order.fill(config, abi.encode(id, price - royalty - price / 100, holder));
         vm.snapshotGasLastCall("NFTFork", string.concat("bid fill: ", label));
 
         assertEq(nft.ownerOf(id), vault, "delivered");
-        assertEq(holder.balance - holderBefore, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
+        assertEq(holder.balance - holderBefore, price - royalty - price / 100, "seller proceeds, less the 1% fee");
         assertEq(address(order).balance, 4 ether, "bid keeps the rest");
         assertFalse(order.closed(), "one of two fills used");
     }
@@ -208,7 +208,7 @@ contract NFTForkTest is Test {
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
         assertEq(ENS.ownerOf(id), buyer);
-        assertEq(proceeds.balance, 0.995 ether, "1 less the 0.5% fee");
+        assertEq(proceeds.balance, 0.99 ether, "1 less the 1% fee");
     }
 
     /// CryptoPunks predate ERC721: no `ownerOf` or `transferFrom`. Bids for them revert and

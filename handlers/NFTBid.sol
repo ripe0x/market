@@ -13,7 +13,7 @@ import {NFTTrade} from "./NFTTrade.sol";
 /// A holder approves this handler, not the order, for the token (`approve` or
 /// `setApprovalForAll`), and fills with
 /// `abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`. The token goes from
-/// the holder straight to `recipient`; `proceedsTo` receives `price - royalty - fee`, and the fill
+/// the holder straight to `recipient`; `proceedsTo` receives `price - fee - royalty`, and the fill
 /// reverts if that is below `minProceeds`, so a stale quote or a changed royalty cannot pay less
 /// than the holder accepted. The order pays exactly the scheduled price, never more: that is
 /// the bidder's limit.
@@ -85,8 +85,7 @@ contract NFTBid is NFTTrade {
         if (!c.anyToken && tokenId != c.tokenId) revert WrongToken(tokenId);
         price = _currentPrice(c.schedule);
         if (order.balance < price) revert InsufficientFunds(price, order.balance);
-        (royaltyTo, royalty) = royaltyOf(c.nft, tokenId, price);
-        fee = feeOf(price);
+        (fee, royaltyTo, royalty) = _split(order, c.nft, tokenId, price);
     }
 
     /// @dev This handler moves the seller's token under the seller's approval to it.

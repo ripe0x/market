@@ -43,6 +43,8 @@ contract Driver is Test {
     // Ghost accounting.
     uint256 public royaltiesOwed;
     uint256 public feesOwed;
+    /// Fee rate each order should pay: the handler's rate when the order was created.
+    mapping(Order => uint256) public rateOf;
     mapping(address => uint256) public proceedsOwed;
     uint256 public bidIn; // funding and top-ups
     uint256 public bidOut; // prices paid
@@ -71,6 +73,7 @@ contract Driver is Test {
         );
         vm.prank(bidder);
         bid = market.create{value: 4 ether}(bids, bidConfig, 0);
+        rateOf[bid] = bids.feeBps();
         bidIn = 4 ether;
     }
 
@@ -90,6 +93,7 @@ contract Driver is Test {
         );
         vm.startPrank(seller);
         Order order = market.create(sale, config, bytes32(listings.length));
+        rateOf[order] = sale.feeBps();
         art.transferFrom(seller, address(order), id);
         vm.stopPrank();
         listings.push(Listing(order, config, id, seller, false));
@@ -99,7 +103,8 @@ contract Driver is Test {
         if (listings.length == 0) return;
         Listing storage l = listings[index % listings.length];
         if (l.done) return;
-        (uint256 price,, uint256 r, uint256 f) = sale.quote(abi.decode(l.config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f) = sale.quote(address(l.order), abi.decode(l.config, (NFTSale.Config)));
+        assertEq(f, price * rateOf[l.order] / 10_000, "sale pays its creation rate");
         extra = bound(extra, 0, 1 ether);
         uint256 before = buyer.balance;
         vm.prank(buyer);
@@ -109,6 +114,15 @@ contract Driver is Test {
         royaltiesOwed += r;
         feesOwed += f;
         proceedsOwed[l.seller] += price - r - f;
+    }
+
+    /// The fee recipient changes a rate. Creations in the same second would keep the old rate,
+    /// so time moves on before any.
+    function setFee(uint16 bps, bool onSale) external {
+        bps = uint16(bound(bps, 0, 100));
+        vm.prank(sale.feeTo());
+        (onSale ? NFTTrade(sale) : NFTTrade(bids)).setFee(bps);
+        skip(1);
     }
 
     function cancel(uint256 index) external {
@@ -131,6 +145,7 @@ contract Driver is Test {
         uint256 price = bids.priceAt(c.schedule, block.timestamp);
         if (address(bid).balance < price) return;
         (,, uint256 r, uint256 f) = bids.quote(address(bid), c, id);
+        assertEq(f, price * rateOf[bid] / 10_000, "bid pays its creation rate");
         vm.prank(seller);
         bid.fill(bidConfig, abi.encode(id, price - r - f, seller));
         royaltiesOwed += r;

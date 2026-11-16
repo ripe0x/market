@@ -13,7 +13,7 @@ import {PaintAction} from "../examples/PaintAction.sol";
 /// are the same on every chain.
 abstract contract Addresses is Script {
     bytes32 constant SALT = keccak256("market.v1");
-    /// @notice Receives the 0.5% fee of every NFTSale and NFTBid fill, forever. Set before deploying.
+    /// @notice Receives the fee (at most 1%) of every NFTSale and NFTBid fill and alone sets its rate, forever. Set before deploying.
     address constant FEE_TO = address(0);
 
     function _at(bytes memory initCode) internal pure returns (address) {

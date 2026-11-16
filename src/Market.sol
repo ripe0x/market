@@ -5,11 +5,16 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IOrderHandler, Order} from "./Order.sol";
 
 /// @title Market
-/// @notice Deploys orders and announces them. Holds nothing, owns nothing, takes no fee and
-/// cannot call anything, so an approval or transfer to this contract grants no authority.
+/// @notice Deploys orders, records when, and announces them. Holds nothing, owns nothing, takes
+/// no fee and cannot call anything, so an approval or transfer to this contract grants no
+/// authority.
 contract Market {
     /// @notice The code every order runs, deployed with Market. Nothing can change it.
     address public immutable implementation = address(new Order());
+
+    /// @notice Timestamp of the block in which `create` deployed `order`; 0 for any account it
+    /// did not deploy. Handlers can use it to apply terms in force when the order was created.
+    mapping(Order order => uint256) public createdAt;
 
     /// @notice `config` is published here so anyone can rebuild and fill the order without an indexer.
     event Created(Order indexed order, address indexed owner, IOrderHandler indexed handler, bytes32 salt, bytes config);
@@ -31,6 +36,7 @@ contract Market {
             implementation, _args(msg.sender, handler, keccak256(config)), salt, msg.value
         );
         order = Order(payable(clone));
+        createdAt[order] = block.timestamp;
         emit Created(order, msg.sender, handler, salt, config);
     }
 

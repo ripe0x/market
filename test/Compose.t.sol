@@ -140,23 +140,23 @@ contract ComposeTest is Base {
 
         // t=700: ask 3.7 ETH, bid 4.8 ETH. Crossed.
         skip(100);
-        (uint256 ask,, uint256 saleRoyalty, uint256 saleFee) = sale.quote(abi.decode(saleConfig, (NFTSale.Config)));
+        (uint256 ask,, uint256 saleRoyalty, uint256 saleFee) = sale.quote(address(saleOrder), abi.decode(saleConfig, (NFTSale.Config)));
         (uint256 offer,, uint256 bidRoyalty, uint256 bidFee) = bids.quote(address(bidOrder), abi.decode(bidConfig, (NFTBid.Config)), 1);
         assertEq(ask, 3.7 ether);
         assertEq(offer, 4.8 ether);
         assertEq(saleRoyalty, 0.185 ether);
         assertEq(bidRoyalty, 0.24 ether);
-        assertEq(saleFee, 0.0185 ether, "0.5% of the ask");
-        assertEq(bidFee, 0.024 ether, "0.5% of the bid");
+        assertEq(saleFee, 0.037 ether, "1% of the ask");
+        assertEq(bidFee, 0.048 ether, "1% of the bid");
 
         _match(ask, ask, offer - bidRoyalty - bidFee, 0.8 ether);
 
         assertEq(art.ownerOf(1), vault, "bidder's recipient holds the token");
-        assertEq(seller.balance, 3.7 ether - 0.185 ether - 0.0185 ether, "seller proceeds: ask less royalty and fee");
+        assertEq(seller.balance, 3.7 ether - 0.185 ether - 0.037 ether, "seller proceeds: ask less royalty and fee");
         assertEq(address(bidOrder).balance, 6 ether - 4.8 ether, "bidder spent exactly the bid");
         assertEq(royalty.balance, 0.185 ether + 0.24 ether, "royalty paid on both sales");
-        assertEq(treasury.balance, 0.0185 ether + 0.024 ether, "fee paid on both sales");
-        assertEq(keeper.balance, 10 ether + 4.536 ether - 3.7 ether, "matcher keeps the spread");
+        assertEq(treasury.balance, 0.037 ether + 0.048 ether, "fee paid on both sales");
+        assertEq(keeper.balance, 10 ether + 4.512 ether - 3.7 ether, "matcher keeps the spread");
         assertEq(address(matcher).balance, 0);
         assertTrue(saleOrder.closed());
         assertTrue(bidOrder.closed(), "a one-token bid closes after its fill");
@@ -169,13 +169,13 @@ contract ComposeTest is Base {
 
     /// Each party's own limit reverts the whole match, the other order's fill included.
     function test_eachLimitRevertsTheWholeMatch() public {
-        skip(700); // ask 3.7, bid 4.8, 4.536 to its seller
+        skip(700); // ask 3.7, bid 4.8, 4.512 to its seller
 
         // Buyer's limit on the sale.
         vm.expectRevert(abi.encodeWithSelector(NFTSale.AboveMaxPrice.selector, 3.7 ether, 3.6 ether));
         _match(3.7 ether, 3.6 ether, 0, 0);
         // Seller's limit on the bid.
-        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 4.536 ether, 4.6 ether));
+        vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 4.512 ether, 4.6 ether));
         _match(3.7 ether, 3.7 ether, 4.6 ether, 0);
         // Matcher's own profit requirement.
         vm.expectRevert("unprofitable");

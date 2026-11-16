@@ -420,7 +420,7 @@ contract Arena is Addresses {
         (Order saleOrder, Order bidOrder) = orders(id, c, start);
         bytes memory sc = saleConfig(c, start);
         bytes memory bc = bidConfig(c, start);
-        (uint256 ask,,,) = nftSale().quote(abi.decode(sc, (NFTSale.Config)));
+        (uint256 ask,,,) = nftSale().quote(address(saleOrder), abi.decode(sc, (NFTSale.Config)));
         (uint256 offer,, uint256 royalty, uint256 fee) = nftBid().quote(address(bidOrder), abi.decode(bc, (NFTBid.Config)), 1);
         require(offer - royalty - fee > ask, "prices have not crossed yet");
         vm.startBroadcast(msg.sender);
