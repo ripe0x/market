@@ -72,6 +72,6 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 
 ## Next actions
 
-1. Owner approval of the money outcomes, with numbers, for the economic pass (none written yet).
+1. Economic pass against the approved outcomes O1 to O10 in [OWNER-REQUIREMENTS.md](../OWNER-REQUIREMENTS.md): flow breakdown under each regime and a one-screen scorecard.
 2. Mainnet: the checklist in [DEPLOYMENT.md](DEPLOYMENT.md#mainnet-release-checklist), then the owner's explicit approval.
 3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.
