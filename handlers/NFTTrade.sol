@@ -138,16 +138,21 @@ abstract contract NFTTrade is HandlerBase {
     }
 
     /// @notice The fee rate of `order`: the rate in force when `Market` created it. An order
-    /// `Market` did not create pays the latest rate.
-    /// ponytail: scans back from the latest rate, one storage read per later change; fine while
-    /// changes are rare.
+    /// `Market` did not create (`createdAt` 0) pays the latest rate.
     function feeBpsOf(address order) public view returns (uint256) {
-        uint256 i = feeRates.length - 1;
-        if (i != 0) {
-            uint256 t = market.createdAt(Order(payable(order)));
-            if (t != 0) while (feeRates[i].since > t) --i;
+        uint256 hi = feeRates.length - 1;
+        if (hi == 0) return feeRates[0].bps;
+        uint256 t = market.createdAt(Order(payable(order)));
+        if (t == 0 || feeRates[hi].since <= t) return feeRates[hi].bps;
+        // `since` never decreases and feeRates[0].since is 0. Keep feeRates[lo].since <= t <
+        // feeRates[hi].since, so the search costs O(log n) reads however many changes follow.
+        uint256 lo;
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (feeRates[mid].since <= t) lo = mid;
+            else hi = mid;
         }
-        return feeRates[i].bps;
+        return feeRates[lo].bps;
     }
 
     /// @notice The fee and the ERC2981 royalty on a fill of `order` for `tokenId` at `price`.

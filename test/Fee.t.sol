@@ -186,6 +186,25 @@ contract FeeTest is Base {
         assertEq(treasury.balance, 0.035 ether);
     }
 
+    /// Across many changes, every order still finds the rate of its own creation second.
+    function test_rateLookupAcrossManyChanges() public {
+        Order[] memory orders = new Order[](40);
+        uint256[] memory rate = new uint256[](40);
+        for (uint256 i; i < 40; ++i) {
+            if (i % 3 == 0) {
+                vm.prank(treasury);
+                sale.setFee(uint16(i * 7 % 101));
+                skip(1);
+            }
+            rate[i] = sale.feeBps();
+            (orders[i],) = _listArtId(i + 1, 1 ether);
+            skip(i % 2);
+        }
+        for (uint256 i; i < 40; ++i) {
+            assertEq(sale.feeBpsOf(address(orders[i])), rate[i]);
+        }
+    }
+
     /// An order deployed outside `Market` has no creation time and pays the latest rate, so a
     /// hand-made clone cannot claim an old, lower rate.
     function test_handMadeOrderPaysLatestRate() public {
