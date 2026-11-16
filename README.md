@@ -4,7 +4,7 @@ Market is a permissionless Ethereum protocol for trading authorized onchain exec
 
 Someone who can make something happen onchain (transfer an NFT, spend ETH, repaint an artwork, call any contract) turns that ability into an **order**: an independent account holding the authority, bound to code that says on what terms anyone may use it. Anyone can **fill** the order by meeting those terms. The execution and its payment settle in one transaction or not at all.
 
-The core is two small contracts with no owner, no fees, no registry, no upgrade path and no knowledge of what is traded. The reference NFT handlers charge a fixed 0.5% per fill.
+The core is two small contracts with no owner, no fees, no registry, no upgrade path and no knowledge of what is traded. The reference NFT handlers charge a fee of up to 1% per fill, set per order when the order is created.
 
 > **Status: experimental, unaudited.** Tests and automated reviews are evidence about tested behaviour, not a safety claim ([docs/STATUS.md](docs/STATUS.md), [docs/SECURITY.md](docs/SECURITY.md)). Nothing is deployed to mainnet.
 
@@ -14,7 +14,7 @@ The core is two small contracts with no owner, no fees, no registry, no upgrade 
 
 | Part | What it is |
 | --- | --- |
-| [`Market`](src/Market.sol) | Factory. `create(handler, config, salt)` deploys an order as a 149-byte ERC-1167 clone and emits `Created(order, owner, handler, salt, config)`. Holds nothing and calls nothing afterwards. |
+| [`Market`](src/Market.sol) | Factory. `create(handler, config, salt)` deploys an order as a 149-byte ERC-1167 clone, records `createdAt[order]` and emits `Created(order, owner, handler, salt, config)`. Holds nothing, takes no fee and calls nothing afterwards. |
 | [`Order`](src/Order.sol) | One account per order, with its own ETH, tokens, approvals and roles. Its terms (owner, handler, handler code hash, config hash) are written into its code and address, so they never change. |
 | OrderHandler | Any contract implementing [`IOrderHandler.onFill`](src/Order.sol). Decides what the order does in a fill and what the filler must give. One handler serves many orders, each with its own config. |
 | Fill | `order.fill(config, input)`, by anyone. The order calls its handler, which makes the order act through `Order.execute`. Any revert undoes everything. |
@@ -43,7 +43,7 @@ Order order = market.create(nftSale, config, salt);
 nft.transferFrom(seller, address(order), 7);            // the order is the escrow
 
 // Buyer: read config from the Created event, quote, fill.
-(uint256 price,,,) = nftSale.quote(c);
+(uint256 price,,,,) = nftSale.quote(address(order), c);
 order.fill{value: price}(config, abi.encode(buyer, price)); // recipient, max price
 
 // Seller, to cancel instead: close, then recover.
@@ -94,7 +94,8 @@ These are different and should not be confused:
 | --- | --- | --- |
 | [`NFTSale`](handlers/NFTSale.sol) | Supported handler | Sell one escrowed ERC721 for ETH at a fixed, falling or rising price. Buyer sets a max price; seller caps the royalty share. |
 | [`NFTBid`](handlers/NFTBid.sol) | Supported handler | Funded bid for one token or up to `maxFills` tokens of a collection, at a fixed, rising or falling price. Holders approve the handler; seller sets minimum proceeds. |
-| [`NFTTrade`](handlers/NFTTrade.sol), [`HandlerBase`](handlers/HandlerBase.sol) | Shared bases | Fill authentication, linear price schedule, ERC2981 royalties (paid atomically, never skipped), `ownerOf` delivery check; `execute` helpers. |
+| [`NFTTrade`](handlers/NFTTrade.sol), [`HandlerBase`](handlers/HandlerBase.sol) | Shared bases | Fill authentication, linear price schedule, ERC2981 royalties (paid atomically, capped at price less fee), the up-to-1% fee read from `FeeConfig`, `ownerOf` delivery check; `execute` helpers. |
+| [`FeeConfig`](handlers/FeeConfig.sol) | Shared fee terms | The recipient and rate both NFT handlers read on each fill. A separate admin sets the rate (at most 1%, locked per order at creation) and the changeable recipient. Market never calls it. |
 | [`FillVerifier`](periphery/FillVerifier.sol) | Optional periphery | Lets a batching wallet revert its own fill unless it received what it expected. Market never calls it. |
 | [`PaintAction`](examples/PaintAction.sol) + [`Artwork`](examples/Artwork.sol) | Example | A non-trading handler: sells one repaint of an artwork using a painter role the artwork contract grants the order, then resigns the role and closes. |
 
@@ -139,7 +140,7 @@ Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tender
 
 ```
 src/        Market.sol, Order.sol (with IOrderHandler): the core
-handlers/   NFTSale, NFTBid and their bases NFTTrade, HandlerBase
+handlers/   NFTSale, NFTBid, their bases NFTTrade, HandlerBase, and the shared FeeConfig
 periphery/  FillVerifier.sol (optional)
 examples/   PaintAction + Artwork
 test/       unit, fuzz, invariant, composition, review PoCs and gas; test/fork: mainnet fork

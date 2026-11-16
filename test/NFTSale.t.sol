@@ -57,8 +57,8 @@ contract NFTSaleTest is Base {
 
         assertEq(art.ownerOf(1), recipient, "token delivered");
         assertEq(royalty.balance, 0.1 ether, "5% royalty");
-        assertEq(treasury.balance, 0.01 ether, "0.5% fee");
-        assertEq(proceeds.balance, 1.89 ether, "seller proceeds");
+        assertEq(treasury.balance, 0.02 ether, "1% fee");
+        assertEq(proceeds.balance, 1.88 ether, "seller proceeds");
         assertEq(buyerBefore - buyer.balance, 2 ether, "buyer spends the price, excess refunded");
         assertEq(address(order).balance, 0, "order keeps nothing");
         assertEq(address(sale).balance, 0, "handler keeps nothing");
@@ -66,17 +66,17 @@ contract NFTSaleTest is Base {
         (uint256 price, uint256 paidRoyalty, uint256 fee) = abi.decode(ret, (uint256, uint256, uint256));
         assertEq(price, 2 ether);
         assertEq(paidRoyalty, 0.1 ether);
-        assertEq(fee, 0.01 ether);
+        assertEq(fee, 0.02 ether);
     }
 
     function test_fallingPrice() public {
         (Order order, bytes memory config) = _list(_schedule(10 ether, 1 ether, 1000, 0), 1000);
         skip(250);
-        (uint256 price,,,) = sale.quote(abi.decode(config, (NFTSale.Config)));
+        (uint256 price,,,,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
         assertEq(price, 7.75 ether);
         _buy(order, config, price, price);
-        assertEq(proceeds.balance, 7.75 ether * 95 / 100 - 7.75 ether / 200, "less 5% royalty and 0.5% fee");
-        assertEq(treasury.balance, 0.03875 ether);
+        assertEq(proceeds.balance, 7.75 ether * 95 / 100 - 7.75 ether / 100, "less 5% royalty and 1% fee");
+        assertEq(treasury.balance, 0.0775 ether);
     }
 
     function test_priceHoldsAtEndPrice() public view {
@@ -132,8 +132,23 @@ contract NFTSaleTest is Base {
         vm.prank(seller);
         nft.transferFrom(seller, address(order), 7);
         _buy(order, config, 1 ether, 1 ether);
-        assertEq(proceeds.balance, 0.995 ether);
+        assertEq(proceeds.balance, 0.99 ether);
         assertEq(nft.ownerOf(7), recipient);
+    }
+
+    /// A royalty above the price is capped at what the fee leaves; the sale settles.
+    function test_royaltyAbovePriceIsCapped() public {
+        ScriptedRoyaltyNFT s = new ScriptedRoyaltyNFT();
+        s.mint(seller, 1);
+        bytes memory config = _config(s, 1, _schedule(1 ether, 1 ether, 0, 0), 10_000);
+        Order order = _create(seller, sale, config);
+        vm.prank(seller);
+        s.transferFrom(seller, address(order), 1);
+        s.script(royalty, 1 ether + 1, false);
+        _buy(order, config, 1 ether, 1 ether);
+        assertEq(royalty.balance, 0.99 ether);
+        assertEq(treasury.balance, 0.01 ether);
+        assertEq(proceeds.balance, 0);
     }
 
     function test_royaltyFailuresRevert() public {
@@ -146,10 +161,6 @@ contract NFTSaleTest is Base {
 
         s.script(royalty, 0, true);
         vm.expectRevert("royalty broken");
-        _buy(order, config, 1 ether, 1 ether);
-
-        s.script(royalty, 1 ether + 1, false);
-        vm.expectRevert(abi.encodeWithSelector(NFTTrade.BadRoyalty.selector, royalty, 1 ether + 1, 1 ether));
         _buy(order, config, 1 ether, 1 ether);
 
         s.script(address(0), 1, false);
@@ -305,11 +316,11 @@ contract NFTSaleTest is Base {
     function testFuzz_settlementConserves(uint96 startPrice, uint96 endPrice, uint32 duration, uint32 wait, uint96 extra, uint16 bps)
         public
     {
-        bps = uint16(bound(bps, 0, 9_950)); // above 99.5% the royalty leaves less than the fee
+        bps = uint16(bound(bps, 0, 10_000));
         art.setRoyalty(royalty, bps);
         (Order order, bytes memory config) = _list(_schedule(startPrice, endPrice, duration, 0), 10_000);
         skip(wait);
-        (uint256 price,, uint256 r, uint256 f) = sale.quote(abi.decode(config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
         uint256 lo = startPrice < endPrice ? startPrice : endPrice;
         uint256 hi = startPrice < endPrice ? endPrice : startPrice;
         assertGe(price, lo);
@@ -321,8 +332,9 @@ contract NFTSaleTest is Base {
         assertEq(royalty.balance, r);
         assertEq(treasury.balance, f);
         assertEq(proceeds.balance, price - r - f);
-        assertEq(r, price * bps / 10_000);
-        assertEq(f, price * 50 / 10_000);
+        assertEq(f, price * 100 / 10_000);
+        uint256 asked = price * bps / 10_000;
+        assertEq(r, asked < price - f ? asked : price - f, "royalty capped at price less fee");
         assertEq(address(order).balance, 0);
     }
 }

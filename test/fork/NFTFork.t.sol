@@ -6,6 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {Market} from "../../src/Market.sol";
 import {Order} from "../../src/Order.sol";
+import {FeeConfig} from "../../handlers/FeeConfig.sol";
 import {NFTBid} from "../../handlers/NFTBid.sol";
 import {NFTSale} from "../../handlers/NFTSale.sol";
 import {NFTTrade} from "../../handlers/NFTTrade.sol";
@@ -28,6 +29,7 @@ contract NFTForkTest is Test {
     address constant PUNKS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB; // CryptoPunks, not ERC721
 
     Market market;
+    FeeConfig fees;
     NFTSale sale;
     NFTBid bids;
     address buyer = makeAddr("buyer");
@@ -42,8 +44,9 @@ contract NFTForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://mainnet.gateway.tenderly.co")), BLOCK);
         market = new Market();
-        sale = new NFTSale(market, treasury);
-        bids = new NFTBid(market, treasury);
+        fees = new FeeConfig(market, makeAddr("market fork fee admin"), treasury);
+        sale = new NFTSale(fees);
+        bids = new NFTBid(fees);
         vm.deal(buyer, 1000 ether);
         vm.deal(bidder, 1000 ether);
         vm.deal(treasury, 1 ether); // an existing account, like the production Safe
@@ -88,7 +91,7 @@ contract NFTForkTest is Test {
 
         assertEq(nft.ownerOf(id), buyer, "delivered");
         assertEq(buyerBefore - buyer.balance, price, "buyer pays the price");
-        assertEq(proceeds.balance, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
+        assertEq(proceeds.balance, price - royalty - price / 100, "seller proceeds, less the 1% fee");
         assertEq(address(order).balance, 0);
         assertTrue(order.closed());
     }
@@ -108,11 +111,11 @@ contract NFTForkTest is Test {
         nft.setApprovalForAll(address(bids), true);
         if (royalty != 0) vm.expectCall(royaltyTo, royalty, "");
         vm.prank(holder);
-        order.fill(config, abi.encode(id, price - royalty - price / 200, holder));
+        order.fill(config, abi.encode(id, price - royalty - price / 100, holder));
         vm.snapshotGasLastCall("NFTFork", string.concat("bid fill: ", label));
 
         assertEq(nft.ownerOf(id), vault, "delivered");
-        assertEq(holder.balance - holderBefore, price - royalty - price / 200, "seller proceeds, less the 0.5% fee");
+        assertEq(holder.balance - holderBefore, price - royalty - price / 100, "seller proceeds, less the 1% fee");
         assertEq(address(order).balance, 4 ether, "bid keeps the rest");
         assertFalse(order.closed(), "one of two fills used");
     }
@@ -208,7 +211,7 @@ contract NFTForkTest is Test {
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
         assertEq(ENS.ownerOf(id), buyer);
-        assertEq(proceeds.balance, 0.995 ether, "1 less the 0.5% fee");
+        assertEq(proceeds.balance, 0.99 ether, "1 less the 1% fee");
     }
 
     /// CryptoPunks predate ERC721: no `ownerOf` or `transferFrom`. Bids for them revert and

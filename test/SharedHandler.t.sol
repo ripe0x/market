@@ -73,7 +73,7 @@ contract SharedHandlerTest is Base {
         vm.prank(buyer);
         b.fill{value: 3 ether}(configB, abi.encode(buyer, 3 ether));
         assertEq(nft.ownerOf(2), buyer);
-        assertEq(other.balance, 2.985 ether, "3 less the 0.5% fee");
+        assertEq(other.balance, 2.97 ether, "3 less the 1% fee");
         assertEq(nft.ownerOf(1), address(a));
         assertEq(seller.balance, 0);
     }
@@ -176,8 +176,8 @@ contract SharedHandlerTest is Base {
         nft.mint(address(holder), 1);
         nft.mint(address(holder), 2);
         holder.call(address(nft), 0, abi.encodeWithSignature("setApprovalForAll(address,bool)", address(bids), true));
-        holder.arm(address(b), abi.encodeCall(Order.fill, (cb, abi.encode(2, 1.99 ether, address(holder)))));
-        holder.call(address(a), 0, abi.encodeCall(Order.fill, (ca, abi.encode(1, 0.995 ether, address(holder)))));
+        holder.arm(address(b), abi.encodeCall(Order.fill, (cb, abi.encode(2, 1.98 ether, address(holder)))));
+        holder.call(address(a), 0, abi.encodeCall(Order.fill, (ca, abi.encode(1, 0.99 ether, address(holder)))));
         assertTrue(holder.succeeded());
 
         assertEq(bids.fills(address(a)), 1);
@@ -186,8 +186,8 @@ contract SharedHandlerTest is Base {
         assertEq(address(b).balance, 1 ether);
         assertEq(nft.ownerOf(1), vaultA);
         assertEq(nft.ownerOf(2), vaultB);
-        assertEq(address(holder).balance, 2.985 ether, "3 less the 0.5% fee");
-        assertEq(treasury.balance, 0.015 ether);
+        assertEq(address(holder).balance, 2.97 ether, "3 less the 1% fee");
+        assertEq(treasury.balance, 0.03 ether);
     }
 
     /// Maintenance on an active order goes through its handler. This handler lets the owner,

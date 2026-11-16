@@ -28,6 +28,7 @@ Identity, lifetime and executions are separate:
 
 ```solidity
 address public immutable implementation;
+mapping(Order order => uint256) public createdAt;
 function create(IOrderHandler handler, bytes calldata config, bytes32 salt) external payable returns (Order);
 function orderAddress(address owner, IOrderHandler handler, bytes32 configHash, bytes32 salt) external view returns (address);
 event Created(Order indexed order, address indexed owner, IOrderHandler indexed handler, bytes32 salt, bytes config);
@@ -35,18 +36,21 @@ event Created(Order indexed order, address indexed owner, IOrderHandler indexed 
 
 `implementation` is `new Order()`, created in Market's constructor. Market has no function that changes it.
 
+`createdAt[order]` is the timestamp of the block in which `create` deployed `order`, and 0 for any account Market did not deploy. A handler can read it to apply the terms in force when an order was created; the reference handlers' shared `FeeConfig` uses it to date each order's fee rate (D306, D307, D309). Market stores it and nothing else about the order; it still takes no fee and has no owner or admin.
+
 `create`:
 
 1. Reverts `NoHandlerCode` if `handler` has no code.
 2. Reverts `DelegatedHandler` if `handler`'s code is an EIP-7702 delegation designator (23 bytes beginning `0xef0100`).
 3. Deploys, with CREATE2 and `salt`, an ERC-1167 clone of `implementation` whose runtime code is the 45-byte proxy followed by the 104-byte terms `abi.encodePacked(msg.sender, handler, handler.codehash, keccak256(config))`, sending it `msg.value`. Reverts if that address already has code (the same terms and salt were used before).
-4. Emits `Created` with the full config, so the order can be rebuilt and filled from the log alone.
+4. Records `createdAt[order] = block.timestamp`.
+5. Emits `Created` with the full config, so the order can be rebuilt and filled from the log alone.
 
 There is no initialization step. The terms exist from the moment the clone's code does.
 
 `orderAddress` returns `create`'s deployment address for the given values while `handler` has its current code: the CREATE2 address over the clone's creation code (OpenZeppelin `Clones.predictDeterministicAddressWithImmutableArgs`). If the handler is not deployed yet, its code hash differs and so does the address.
 
-Market has no other state or functions. It never calls a handler or an order after deployment.
+Beyond `implementation` and the `createdAt` record, Market has no other state or functions. It never calls a handler or an order after deployment.
 
 ## Order
 

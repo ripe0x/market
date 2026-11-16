@@ -6,6 +6,7 @@ import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {Market} from "../src/Market.sol";
 import {Order} from "../src/Order.sol";
+import {FeeConfig} from "./FeeConfig.sol";
 import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title NFTTrade
@@ -13,13 +14,14 @@ import {HandlerBase} from "./HandlerBase.sol";
 ///
 /// Money terms, the same in both handlers:
 /// - `price` is everything the buyer spends. Nothing is added on top.
-/// - `royalty` is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, paid out of
-///   `price`. Collections that do not report ERC2981 through ERC165 pay none. A collection that
-///   reports it but reverts, asks more than `price` less the fee, names no receiver, or whose receiver refuses
-///   ETH makes the fill revert: a royalty is never skipped.
-/// - `fee` is `FEE_BPS` (0.5%) of `price`, rounded down, paid out of `price` to `feeTo`, fixed at
-///   deployment. A `feeTo` that refuses ETH makes every fill revert.
-/// - `proceeds = price - royalty - fee` goes to the seller.
+/// - `fee` is the order's rate in `fees` (at most 1%, fixed when the order was created) of
+///   `price`, rounded down, paid out of `price` to the current `fees.recipient()`. A recipient
+///   that refuses ETH makes fills revert until the fee admin replaces it.
+/// - `royalty` is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, capped at
+///   `price - fee`, paid out of `price`. Collections that do not report ERC2981 through ERC165
+///   pay none. A collection that reports it but reverts, or asks a royalty with no receiver, or
+///   whose receiver refuses ETH, makes the fill revert: a royalty is never skipped.
+/// - `proceeds = price - fee - royalty` goes to the seller.
 ///
 /// Both handlers act only inside a genuine fill (`_requireFill`), so their `Sold` and `Bought`
 /// events always describe a settlement that happened.
@@ -42,11 +44,8 @@ abstract contract NFTTrade is HandlerBase {
     error BadRoyalty(address receiver, uint256 royalty, uint256 price);
     error NotDelivered();
     error NotAFill();
-
-    /// @notice Fee on every fill, in basis points of the price.
-    uint256 public constant FEE_BPS = 50;
-    /// @notice Receives every fill's fee. Fixed at deployment; nobody can change it.
-    address public immutable feeTo;
+    /// @notice The fee recipient and rates, shared by both NFT handlers.
+    FeeConfig public immutable fees;
 
     /// @dev Hash of the 45 byte ERC-1167 proxy code delegating to Market's order implementation.
     /// Any account whose code starts with it runs `Order`, whoever deployed it, so its `fill`
@@ -55,11 +54,10 @@ abstract contract NFTTrade is HandlerBase {
     /// @dev Proxy code plus the 104 bytes of arguments `Market` appends.
     uint256 private constant CLONE_SIZE = 149;
 
-    constructor(Market market, address feeTo_) {
-        if (feeTo_ == address(0)) revert ZeroAddress();
-        feeTo = feeTo_;
+    constructor(FeeConfig fees_) {
+        fees = fees_;
         proxyHash = keccak256(
-            abi.encodePacked(hex"363d3d373d3d3d363d73", market.implementation(), hex"5af43d82803e903d91602b57fd5bf3")
+            abi.encodePacked(hex"363d3d373d3d3d363d73", fees_.market().implementation(), hex"5af43d82803e903d91602b57fd5bf3")
         );
     }
 
@@ -106,13 +104,21 @@ abstract contract NFTTrade is HandlerBase {
             : s.startPrice + (s.endPrice - s.startPrice) * elapsed / duration;
     }
 
-    /// @notice The fee on a fill at `price`.
-    function feeOf(uint256 price) public pure returns (uint256) {
-        return price * FEE_BPS / 10_000;
+    /// @notice The fee and the ERC2981 royalty on a fill of `order` for `tokenId` at `price`.
+    /// The royalty is capped at what the fee leaves.
+    function _split(address order, IERC721 nft, uint256 tokenId, uint256 price)
+        internal
+        view
+        returns (address feeTo, uint256 fee, address royaltyTo, uint256 royalty)
+    {
+        uint256 bps;
+        (feeTo, bps) = fees.terms(order);
+        fee = price * bps / 10_000;
+        (royaltyTo, royalty) = royaltyOf(nft, tokenId, price);
+        if (royalty > price - fee) royalty = price - fee;
     }
 
-    /// @notice The ERC2981 royalty `nft` asks on a sale of `tokenId` at `price`. Reverts if it
-    /// leaves less than the fee.
+    /// @notice The ERC2981 royalty `nft` asks on a sale of `tokenId` at `price`, uncapped.
     function royaltyOf(IERC721 nft, uint256 tokenId, uint256 price)
         public
         view
@@ -120,7 +126,7 @@ abstract contract NFTTrade is HandlerBase {
     {
         if (!ERC165Checker.supportsInterface(address(nft), type(IERC2981).interfaceId)) return (address(0), 0);
         (receiver, royalty) = IERC2981(address(nft)).royaltyInfo(tokenId, price);
-        if (royalty > price - feeOf(price) || (royalty != 0 && receiver == address(0))) revert BadRoyalty(receiver, royalty, price);
+        if (royalty != 0 && receiver == address(0)) revert BadRoyalty(receiver, royalty, price);
     }
 
     /// @dev Moves `tokenId` from `from` to `to` with `transferFrom` (see `_transfer`), which

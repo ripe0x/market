@@ -47,6 +47,17 @@ contract GasTest is Base {
         vm.snapshotGasLastCall("fill: NFTSale, fixed price, no royalty, exact");
     }
 
+    /// An order created before a rate change looks up its rate: one more call and two reads.
+    function test_gasNFTSaleAfterRateChange() public {
+        (Order order, bytes memory config) = _listSale(seller, 1, 1 ether);
+        vm.prank(feeAdmin);
+        fees.setFee(50);
+        skip(1);
+        vm.prank(buyer);
+        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
+        vm.snapshotGasLastCall("fill: NFTSale, fixed price, no royalty, after a rate change");
+    }
+
     function test_gasNFTBid() public {
         NFTTrade.Schedule memory s = NFTTrade.Schedule(1 ether, 2 ether, block.timestamp, block.timestamp + 1000, 0);
         bytes memory config = abi.encode(NFTBid.Config(art, true, 0, s, royalty, 2));
