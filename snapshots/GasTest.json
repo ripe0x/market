@@ -3,10 +3,10 @@
   "create: NFTBid order, funded": "117709",
   "create: NFTSale order": "117318",
   "execute: owner withdraws NFT": "64080",
-  "fill: NFTBid, last fill closes": "146718",
-  "fill: NFTBid, rising collection bid, royalty": "186809",
-  "fill: NFTSale, falling price, royalty, refund": "195077",
-  "fill: NFTSale, fixed price, no royalty, after a rate change": "150943",
-  "fill: NFTSale, fixed price, no royalty, exact": "143124",
+  "fill: NFTBid, last fill closes": "146770",
+  "fill: NFTBid, rising collection bid, royalty": "186861",
+  "fill: NFTSale, falling price, royalty, refund": "195129",
+  "fill: NFTSale, fixed price, no royalty, after a rate change": "150995",
+  "fill: NFTSale, fixed price, no royalty, exact": "143176",
   "fill: PaintAction, paint + resign + close": "109600"
 }

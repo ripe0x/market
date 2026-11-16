@@ -12,7 +12,8 @@ import {Order} from "../src/Order.sol";
 ///   created from the next second on; every order keeps the rate in force when `Market` created
 ///   it (`feeBpsOf`). An order `Market` did not create pays the latest rate.
 /// - The recipient applies at once to every fill, including orders created earlier.
-/// - The admin can hand the role to another account. Nothing else is privileged.
+/// - The admin can offer the role to another account, which takes it with `acceptAdmin`.
+///   Nothing else is privileged.
 contract FeeConfig {
     /// @notice A fee rate and the first order creation time it applies to.
     struct Rate {
@@ -26,12 +27,15 @@ contract FeeConfig {
     Market public immutable market;
     /// @notice Sets the rate, the recipient and the next admin.
     address public admin;
+    /// @notice The account `admin` has offered the role to; 0 when none.
+    address public pendingAdmin;
     /// @notice Receives every fill's fee.
     address public recipient;
     /// @notice Every rate ever set, oldest first; `since` never decreases.
     Rate[] public rates;
 
     event AdminSet(address admin);
+    event AdminOffered(address pendingAdmin);
     event RecipientSet(address recipient);
     event FeeSet(uint256 bps, uint256 since);
 
@@ -55,15 +59,23 @@ contract FeeConfig {
         _;
     }
 
-    /// @notice Hand the admin role to `admin_`. Takes effect at once; a wrong address loses it.
+    /// @notice Offer the admin role to `admin_`, replacing any earlier offer; 0 withdraws it.
+    /// Nothing changes until `admin_` accepts.
     function setAdmin(address admin_) external onlyAdmin {
-        if (admin_ == address(0)) revert ZeroAddress();
-        admin = admin_;
-        emit AdminSet(admin_);
+        pendingAdmin = admin_;
+        emit AdminOffered(admin_);
     }
 
-    /// @notice Send every later fee, from every order, to `recipient_`. If it refuses ETH, fills
-    /// revert until the admin sets one that accepts.
+    /// @notice Take the admin role offered to the caller.
+    function acceptAdmin() external {
+        if (msg.sender != pendingAdmin || msg.sender == address(0)) revert NotAdmin();
+        admin = msg.sender;
+        pendingAdmin = address(0);
+        emit AdminSet(msg.sender);
+    }
+
+    /// @notice Send every later fee, from every order, to `recipient_`. If it refuses ETH, every
+    /// fill with a nonzero fee reverts until the admin sets one that accepts.
     function setRecipient(address recipient_) external onlyAdmin {
         if (recipient_ == address(0)) revert ZeroAddress();
         recipient = recipient_;

@@ -65,8 +65,6 @@ contract FeeTest is Base {
         vm.startPrank(feeAdmin);
         vm.expectRevert(FeeConfig.ZeroAddress.selector);
         fees.setRecipient(address(0));
-        vm.expectRevert(FeeConfig.ZeroAddress.selector);
-        fees.setAdmin(address(0));
         vm.stopPrank();
     }
 
@@ -188,16 +186,40 @@ contract FeeTest is Base {
         assertEq(treasury.balance, 0);
     }
 
+    /// The role moves only when the offered account accepts; the old admin then loses it.
     function test_adminHandoff() public {
         address next = makeAddr("next admin");
         vm.prank(feeAdmin);
         fees.setAdmin(next);
+        assertEq(fees.admin(), feeAdmin, "nothing changes before acceptance");
+        vm.prank(buyer);
+        vm.expectRevert(FeeConfig.NotAdmin.selector);
+        fees.acceptAdmin();
+        vm.prank(next);
+        fees.acceptAdmin();
+        assertEq(fees.admin(), next);
+        assertEq(fees.pendingAdmin(), address(0));
         vm.prank(feeAdmin);
         vm.expectRevert(FeeConfig.NotAdmin.selector);
         fees.setFee(0);
         vm.prank(next);
         fees.setFee(0);
         assertEq(fees.feeBps(), 0);
+    }
+
+    /// A mistyped offer is replaced or withdrawn; nobody can accept a withdrawn one.
+    function test_adminOfferWithdrawn() public {
+        vm.startPrank(feeAdmin);
+        fees.setAdmin(makeAddr("typo"));
+        fees.setAdmin(address(0));
+        vm.stopPrank();
+        vm.prank(makeAddr("typo"));
+        vm.expectRevert(FeeConfig.NotAdmin.selector);
+        fees.acceptAdmin();
+        vm.prank(address(0));
+        vm.expectRevert(FeeConfig.NotAdmin.selector);
+        fees.acceptAdmin();
+        assertEq(fees.admin(), feeAdmin);
     }
 
     /// Each order keeps the rate in force when it was created, through cuts and raises.
