@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {Market} from "../src/Market.sol";
+import {FeeConfig} from "./FeeConfig.sol";
 import {NFTTrade} from "./NFTTrade.sol";
 
 /// @title NFTSale
@@ -37,7 +37,7 @@ contract NFTSale is NFTTrade {
     error Underpaid(uint256 price, uint256 value);
     error RoyaltyAboveLimit(uint256 royalty, uint256 limit);
 
-    constructor(Market market, address feeTo_) NFTTrade(market, feeTo_) {}
+    constructor(FeeConfig fees_) NFTTrade(fees_) {}
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
@@ -47,7 +47,7 @@ contract NFTSale is NFTTrade {
         _requireFill();
         Config memory c = abi.decode(config, (Config));
         (address recipient, uint256 maxPrice) = abi.decode(input, (address, uint256));
-        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee) = quote(msg.sender, c);
+        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo) = quote(msg.sender, c);
         if (price > maxPrice) revert AboveMaxPrice(price, maxPrice);
         if (value < price) revert Underpaid(price, value);
 
@@ -72,11 +72,11 @@ contract NFTSale is NFTTrade {
     function quote(address order, Config memory c)
         public
         view
-        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee)
+        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo)
     {
         if (c.proceedsTo == address(0)) revert ZeroAddress();
         price = _currentPrice(c.schedule);
-        (fee, royaltyTo, royalty) = _split(order, c.nft, c.tokenId, price);
+        (feeTo, fee, royaltyTo, royalty) = _split(order, c.nft, c.tokenId, price);
         uint256 limit = price * c.maxRoyaltyBps / 10_000;
         if (royalty > limit) revert RoyaltyAboveLimit(royalty, limit);
     }

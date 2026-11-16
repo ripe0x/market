@@ -165,7 +165,7 @@ contract NFTReviewPoC is Base {
     // underflow. Shown here for completeness.
     // -------------------------------------------------------------------------------------------
     function test_info_maxRoyaltyBpsAboveDenominatorIsHarmless() public {
-        NFTSale saleH = new NFTSale(market, treasury);
+        NFTSale saleH = new NFTSale(fees);
         RoyaltyNFT c = new RoyaltyNFT();
         c.setRoyalty(royalty, 10_000); // 100% royalty, capped beside the 1% fee
         c.mint(seller, 1);

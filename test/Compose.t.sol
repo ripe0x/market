@@ -140,8 +140,8 @@ contract ComposeTest is Base {
 
         // t=700: ask 3.7 ETH, bid 4.8 ETH. Crossed.
         skip(100);
-        (uint256 ask,, uint256 saleRoyalty, uint256 saleFee) = sale.quote(address(saleOrder), abi.decode(saleConfig, (NFTSale.Config)));
-        (uint256 offer,, uint256 bidRoyalty, uint256 bidFee) = bids.quote(address(bidOrder), abi.decode(bidConfig, (NFTBid.Config)), 1);
+        (uint256 ask,, uint256 saleRoyalty, uint256 saleFee,) = sale.quote(address(saleOrder), abi.decode(saleConfig, (NFTSale.Config)));
+        (uint256 offer,, uint256 bidRoyalty, uint256 bidFee,) = bids.quote(address(bidOrder), abi.decode(bidConfig, (NFTBid.Config)), 1);
         assertEq(ask, 3.7 ether);
         assertEq(offer, 4.8 ether);
         assertEq(saleRoyalty, 0.185 ether);

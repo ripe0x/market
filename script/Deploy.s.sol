@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {Market} from "../src/Market.sol";
 import {FillVerifier} from "../periphery/FillVerifier.sol";
+import {FeeConfig} from "../handlers/FeeConfig.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {NFTSale} from "../handlers/NFTSale.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
@@ -13,8 +14,11 @@ import {PaintAction} from "../examples/PaintAction.sol";
 /// are the same on every chain.
 abstract contract Addresses is Script {
     bytes32 constant SALT = keccak256("market.v1");
-    /// @notice Receives the fee (at most 1%) of every NFTSale and NFTBid fill and alone sets its rate, forever. Set before deploying.
-    address constant FEE_TO = address(0);
+    /// @notice First FeeConfig admin: sets the fee rate (at most 1%) and recipient, and can hand
+    /// the role on.
+    address constant FEE_ADMIN = 0xCB43078C32423F5348Cab5885911C3B5faE217F9;
+    /// @notice First recipient of every NFTSale and NFTBid fee; the admin can change it.
+    address constant FEE_TO = 0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72;
 
     function _at(bytes memory initCode) internal pure returns (address) {
         return vm.computeCreate2Address(SALT, keccak256(initCode));
@@ -24,12 +28,16 @@ abstract contract Addresses is Script {
         return Market(_at(type(Market).creationCode));
     }
 
+    function feeConfig() internal pure returns (FeeConfig) {
+        return FeeConfig(_at(abi.encodePacked(type(FeeConfig).creationCode, abi.encode(market(), FEE_ADMIN, FEE_TO))));
+    }
+
     function nftSale() internal pure returns (NFTSale) {
-        return NFTSale(_at(abi.encodePacked(type(NFTSale).creationCode, abi.encode(market(), FEE_TO))));
+        return NFTSale(_at(abi.encodePacked(type(NFTSale).creationCode, abi.encode(feeConfig()))));
     }
 
     function nftBid() internal pure returns (NFTBid) {
-        return NFTBid(_at(abi.encodePacked(type(NFTBid).creationCode, abi.encode(market(), FEE_TO))));
+        return NFTBid(_at(abi.encodePacked(type(NFTBid).creationCode, abi.encode(feeConfig()))));
     }
 
     function fillVerifier() internal pure returns (FillVerifier) {
@@ -42,8 +50,8 @@ abstract contract Addresses is Script {
 }
 
 /// @notice Deploys the supported release: Market (which deploys the one Order implementation),
-/// NFTSale, NFTBid and the optional FillVerifier. None has an owner; the NFT handlers take the
-/// Market address. A contract already at its address is skipped, so a partial run resumes and
+/// FeeConfig, NFTSale, NFTBid and the optional FillVerifier. Only FeeConfig has an admin
+/// (`FEE_ADMIN`), limited to the NFT handlers' fee rate (at most 1%) and recipient. A contract already at its address is skipped, so a partial run resumes and
 /// a repeat run sends nothing.
 ///
 ///   forge script script/Deploy.s.sol --rpc-url <rpc>                      # simulate
@@ -53,16 +61,17 @@ abstract contract Addresses is Script {
 /// the owner's explicit approval.
 contract Deploy is Addresses {
     function run() external {
-        require(FEE_TO != address(0), "set FEE_TO");
         vm.startBroadcast();
         if (_absent(address(market()))) new Market{salt: SALT}();
-        if (_absent(address(nftSale()))) new NFTSale{salt: SALT}(market(), FEE_TO);
-        if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(market(), FEE_TO);
+        if (_absent(address(feeConfig()))) new FeeConfig{salt: SALT}(market(), FEE_ADMIN, FEE_TO);
+        if (_absent(address(nftSale()))) new NFTSale{salt: SALT}(feeConfig());
+        if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(feeConfig());
         if (_absent(address(fillVerifier()))) new FillVerifier{salt: SALT}();
         vm.stopBroadcast();
 
         _log("Market", address(market()));
         _log("Order implementation", market().implementation());
+        _log("FeeConfig", address(feeConfig()));
         _log("NFTSale", address(nftSale()));
         _log("NFTBid", address(nftBid()));
         _log("FillVerifier", address(fillVerifier()));

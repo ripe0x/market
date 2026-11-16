@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Market} from "../src/Market.sol";
 import {IOrderHandler, Order} from "../src/Order.sol";
+import {FeeConfig} from "../handlers/FeeConfig.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {NFTSale} from "../handlers/NFTSale.sol";
 import {NFTTrade} from "../handlers/NFTTrade.sol";
@@ -14,8 +15,11 @@ import {RoyaltyNFT} from "./utils/Mocks.sol";
 /// theft attempts against both NFT handlers, with ghost accounting of every payment.
 contract Driver is Test {
     Market public market = new Market();
-    NFTSale public sale = new NFTSale(market, makeAddr("treasury"));
-    NFTBid public bids = new NFTBid(market, makeAddr("treasury"));
+    address public treasury1 = makeAddr("treasury");
+    address public treasury2 = makeAddr("treasury2");
+    FeeConfig public fees = new FeeConfig(market, makeAddr("feeAdmin"), treasury1);
+    NFTSale public sale = new NFTSale(fees);
+    NFTBid public bids = new NFTBid(fees);
     RoyaltyNFT public art = new RoyaltyNFT();
 
     uint256 public constant TOKENS = 12;
@@ -73,7 +77,7 @@ contract Driver is Test {
         );
         vm.prank(bidder);
         bid = market.create{value: 4 ether}(bids, bidConfig, 0);
-        rateOf[bid] = bids.feeBps();
+        rateOf[bid] = fees.feeBps();
         bidIn = 4 ether;
     }
 
@@ -93,7 +97,7 @@ contract Driver is Test {
         );
         vm.startPrank(seller);
         Order order = market.create(sale, config, bytes32(listings.length));
-        rateOf[order] = sale.feeBps();
+        rateOf[order] = fees.feeBps();
         art.transferFrom(seller, address(order), id);
         vm.stopPrank();
         listings.push(Listing(order, config, id, seller, false));
@@ -103,7 +107,7 @@ contract Driver is Test {
         if (listings.length == 0) return;
         Listing storage l = listings[index % listings.length];
         if (l.done) return;
-        (uint256 price,, uint256 r, uint256 f) = sale.quote(address(l.order), abi.decode(l.config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f,) = sale.quote(address(l.order), abi.decode(l.config, (NFTSale.Config)));
         assertEq(f, price * rateOf[l.order] / 10_000, "sale pays its creation rate");
         extra = bound(extra, 0, 1 ether);
         uint256 before = buyer.balance;
@@ -118,10 +122,16 @@ contract Driver is Test {
 
     /// The fee recipient changes a rate. Creations in the same second would keep the old rate,
     /// so time moves on before any.
-    function setFee(uint16 bps, bool onSale) external {
+    /// The admin moves the fee between two recipients; fees owed are checked on their sum.
+    function setRecipient(bool second) external {
+        vm.prank(fees.admin());
+        fees.setRecipient(second ? treasury2 : treasury1);
+    }
+
+    function setFee(uint16 bps) external {
         bps = uint16(bound(bps, 0, 100));
-        vm.prank(sale.feeTo());
-        (onSale ? NFTTrade(sale) : NFTTrade(bids)).setFee(bps);
+        vm.prank(fees.admin());
+        fees.setFee(bps);
         skip(1);
     }
 
@@ -144,7 +154,7 @@ contract Driver is Test {
         NFTBid.Config memory c = abi.decode(bidConfig, (NFTBid.Config));
         uint256 price = bids.priceAt(c.schedule, block.timestamp);
         if (address(bid).balance < price) return;
-        (,, uint256 r, uint256 f) = bids.quote(address(bid), c, id);
+        (,, uint256 r, uint256 f,) = bids.quote(address(bid), c, id);
         assertEq(f, price * rateOf[bid] / 10_000, "bid pays its creation rate");
         vm.prank(seller);
         bid.fill(bidConfig, abi.encode(id, price - r - f, seller));
@@ -269,8 +279,8 @@ contract InvariantTest is Test {
 
     function invariant_everyPaymentAccounted() public view {
         assertEq(d.royaltyTo().balance, d.royaltiesOwed(), "royalties");
-        assertEq(d.sale().feeTo(), d.bids().feeTo());
-        assertEq(d.sale().feeTo().balance, d.feesOwed(), "fees");
+        assertEq(address(d.sale().fees()), address(d.bids().fees()));
+        assertEq(d.treasury1().balance + d.treasury2().balance, d.feesOwed(), "fees");
         for (uint256 i; i < 2; ++i) {
             address h = d.holders(i);
             assertEq(h.balance, d.proceedsOwed(h), "seller proceeds");

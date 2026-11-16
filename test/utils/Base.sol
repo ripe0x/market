@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {Market} from "../../src/Market.sol";
 import {IOrderHandler, Order} from "../../src/Order.sol";
+import {FeeConfig} from "../../handlers/FeeConfig.sol";
 import {NFTBid} from "../../handlers/NFTBid.sol";
 import {NFTSale} from "../../handlers/NFTSale.sol";
 import {NFTTrade} from "../../handlers/NFTTrade.sol";
@@ -12,6 +13,7 @@ import {TestNFT} from "./Mocks.sol";
 
 abstract contract Base is Test {
     Market market;
+    FeeConfig fees;
     NFTSale sale;
     NFTBid bids;
     PaintAction paint;
@@ -22,14 +24,16 @@ abstract contract Base is Test {
     address attacker = makeAddr("attacker");
     address royalty = makeAddr("royalty");
     address treasury = makeAddr("treasury");
+    address feeAdmin = makeAddr("feeAdmin");
 
     uint256 salt;
 
     function setUp() public virtual {
         vm.warp(1_000_000);
         market = new Market();
-        sale = new NFTSale(market, treasury);
-        bids = new NFTBid(market, treasury);
+        fees = new FeeConfig(market, feeAdmin, treasury);
+        sale = new NFTSale(fees);
+        bids = new NFTBid(fees);
         paint = new PaintAction();
         nft = new TestNFT();
         vm.deal(buyer, 100 ether);

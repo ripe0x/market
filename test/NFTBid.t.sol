@@ -85,7 +85,7 @@ contract NFTBidTest is Base {
         bytes memory config = _config(true, 0, s, 1);
         Order order = _bid(config, 3 ether);
         skip(500);
-        (uint256 price,, uint256 r, uint256 f) = bids.quote(address(order), abi.decode(config, (NFTBid.Config)), 1);
+        (uint256 price,, uint256 r, uint256 f,) = bids.quote(address(order), abi.decode(config, (NFTBid.Config)), 1);
         assertEq(price, 2 ether);
         vm.expectRevert(abi.encodeWithSelector(NFTBid.BelowMinProceeds.selector, 1.88 ether, 2 ether));
         _sell(order, config, 1, 2 ether);

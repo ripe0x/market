@@ -6,6 +6,7 @@ import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {Market} from "../src/Market.sol";
 import {Order} from "../src/Order.sol";
+import {FeeConfig} from "./FeeConfig.sol";
 import {HandlerBase} from "./HandlerBase.sol";
 
 /// @title NFTTrade
@@ -13,8 +14,9 @@ import {HandlerBase} from "./HandlerBase.sol";
 ///
 /// Money terms, the same in both handlers:
 /// - `price` is everything the buyer spends. Nothing is added on top.
-/// - `fee` is the order's fee rate (`feeBpsOf`, at most `MAX_FEE_BPS`, 1%) of `price`, rounded
-///   down, paid out of `price` to `feeTo`. A `feeTo` that refuses ETH makes every fill revert.
+/// - `fee` is the order's rate in `fees` (at most 1%, fixed when the order was created) of
+///   `price`, rounded down, paid out of `price` to the current `fees.recipient()`. A recipient
+///   that refuses ETH makes fills revert until the fee admin replaces it.
 /// - `royalty` is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, capped at
 ///   `price - fee`, paid out of `price`. Collections that do not report ERC2981 through ERC165
 ///   pay none. A collection that reports it but reverts, or asks a royalty with no receiver, or
@@ -42,25 +44,8 @@ abstract contract NFTTrade is HandlerBase {
     error BadRoyalty(address receiver, uint256 royalty, uint256 price);
     error NotDelivered();
     error NotAFill();
-    error NotFeeTo();
-    error FeeTooHigh(uint256 bps);
-
-    /// @notice A fee rate and the first order creation time it applies to.
-    struct FeeRate {
-        uint64 since;
-        uint16 bps;
-    }
-
-    event FeeSet(uint256 bps, uint256 since);
-
-    /// @notice The highest fee rate, in basis points of the price: 1%.
-    uint256 public constant MAX_FEE_BPS = 100;
-    /// @notice Receives every fill's fee and alone can change the rate for new orders. Fixed at
-    /// deployment; nobody can change it.
-    address public immutable feeTo;
-    Market public immutable market;
-    /// @notice Every rate ever set, oldest first. The first starts at `MAX_FEE_BPS`.
-    FeeRate[] public feeRates;
+    /// @notice The fee recipient and rates, shared by both NFT handlers.
+    FeeConfig public immutable fees;
 
     /// @dev Hash of the 45 byte ERC-1167 proxy code delegating to Market's order implementation.
     /// Any account whose code starts with it runs `Order`, whoever deployed it, so its `fill`
@@ -69,13 +54,10 @@ abstract contract NFTTrade is HandlerBase {
     /// @dev Proxy code plus the 104 bytes of arguments `Market` appends.
     uint256 private constant CLONE_SIZE = 149;
 
-    constructor(Market market_, address feeTo_) {
-        if (feeTo_ == address(0)) revert ZeroAddress();
-        feeTo = feeTo_;
-        market = market_;
-        feeRates.push(FeeRate(0, uint16(MAX_FEE_BPS)));
+    constructor(FeeConfig fees_) {
+        fees = fees_;
         proxyHash = keccak256(
-            abi.encodePacked(hex"363d3d373d3d3d363d73", market_.implementation(), hex"5af43d82803e903d91602b57fd5bf3")
+            abi.encodePacked(hex"363d3d373d3d3d363d73", fees_.market().implementation(), hex"5af43d82803e903d91602b57fd5bf3")
         );
     }
 
@@ -122,47 +104,16 @@ abstract contract NFTTrade is HandlerBase {
             : s.startPrice + (s.endPrice - s.startPrice) * elapsed / duration;
     }
 
-    /// @notice Set the fee rate for orders created from the next second on. Orders created
-    /// earlier keep the rate in force at their creation. Only `feeTo`, at most `MAX_FEE_BPS`.
-    function setFee(uint16 bps) external {
-        if (msg.sender != feeTo) revert NotFeeTo();
-        if (bps > MAX_FEE_BPS) revert FeeTooHigh(bps);
-        uint64 since = uint64(block.timestamp + 1);
-        feeRates.push(FeeRate(since, bps));
-        emit FeeSet(bps, since);
-    }
-
-    /// @notice The rate new orders get.
-    function feeBps() external view returns (uint256) {
-        return feeRates[feeRates.length - 1].bps;
-    }
-
-    /// @notice The fee rate of `order`: the rate in force when `Market` created it. An order
-    /// `Market` did not create (`createdAt` 0) pays the latest rate.
-    function feeBpsOf(address order) public view returns (uint256) {
-        uint256 hi = feeRates.length - 1;
-        if (hi == 0) return feeRates[0].bps;
-        uint256 t = market.createdAt(Order(payable(order)));
-        if (t == 0 || feeRates[hi].since <= t) return feeRates[hi].bps;
-        // `since` never decreases and feeRates[0].since is 0. Keep feeRates[lo].since <= t <
-        // feeRates[hi].since, so the search costs O(log n) reads however many changes follow.
-        uint256 lo;
-        while (hi - lo > 1) {
-            uint256 mid = (lo + hi) / 2;
-            if (feeRates[mid].since <= t) lo = mid;
-            else hi = mid;
-        }
-        return feeRates[lo].bps;
-    }
-
     /// @notice The fee and the ERC2981 royalty on a fill of `order` for `tokenId` at `price`.
     /// The royalty is capped at what the fee leaves.
     function _split(address order, IERC721 nft, uint256 tokenId, uint256 price)
         internal
         view
-        returns (uint256 fee, address royaltyTo, uint256 royalty)
+        returns (address feeTo, uint256 fee, address royaltyTo, uint256 royalty)
     {
-        fee = price * feeBpsOf(order) / 10_000;
+        uint256 bps;
+        (feeTo, bps) = fees.terms(order);
+        fee = price * bps / 10_000;
         (royaltyTo, royalty) = royaltyOf(nft, tokenId, price);
         if (royalty > price - fee) royalty = price - fee;
     }

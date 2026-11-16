@@ -131,7 +131,7 @@ ORDER=$(cast call $MARKET "orderAddress(address,address,bytes32,bytes32)(address
 cast send $NFT "transferFrom(address,address,uint256)" $ME $ORDER $ID
 
 # Anyone: quote, then fill (input: recipient, maxPrice). quote takes the order, which dates its fee rate
-PRICE=$(cast call $NFT_SALE "quote(address,$SALE_T)(uint256,address,uint256,uint256)" $ORDER "$TERMS" | head -1 | awk '{print $1}')
+PRICE=$(cast call $NFT_SALE "quote(address,$SALE_T)(uint256,address,uint256,uint256,address)" $ORDER "$TERMS" | head -1 | awk '{print $1}')
 cast send $ORDER "fill(bytes,bytes)" $CONFIG $(cast abi-encode "f(address,uint256)" $BUYER $PRICE) --value $PRICE
 
 # Seller, instead of a sale: cancel and recover

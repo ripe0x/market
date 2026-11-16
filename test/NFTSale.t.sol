@@ -72,7 +72,7 @@ contract NFTSaleTest is Base {
     function test_fallingPrice() public {
         (Order order, bytes memory config) = _list(_schedule(10 ether, 1 ether, 1000, 0), 1000);
         skip(250);
-        (uint256 price,,,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
+        (uint256 price,,,,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
         assertEq(price, 7.75 ether);
         _buy(order, config, price, price);
         assertEq(proceeds.balance, 7.75 ether * 95 / 100 - 7.75 ether / 100, "less 5% royalty and 1% fee");
@@ -320,7 +320,7 @@ contract NFTSaleTest is Base {
         art.setRoyalty(royalty, bps);
         (Order order, bytes memory config) = _list(_schedule(startPrice, endPrice, duration, 0), 10_000);
         skip(wait);
-        (uint256 price,, uint256 r, uint256 f) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
         uint256 lo = startPrice < endPrice ? startPrice : endPrice;
         uint256 hi = startPrice < endPrice ? endPrice : startPrice;
         assertGe(price, lo);

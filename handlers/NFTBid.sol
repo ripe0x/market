@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {Market} from "../src/Market.sol";
+import {FeeConfig} from "./FeeConfig.sol";
 import {NFTTrade} from "./NFTTrade.sol";
 
 /// @title NFTBid
@@ -48,7 +48,7 @@ contract NFTBid is NFTTrade {
     error InsufficientFunds(uint256 price, uint256 balance);
     error BelowMinProceeds(uint256 proceeds, uint256 minProceeds);
 
-    constructor(Market market, address feeTo_) NFTTrade(market, feeTo_) {}
+    constructor(FeeConfig fees_) NFTTrade(fees_) {}
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
@@ -60,7 +60,7 @@ contract NFTBid is NFTTrade {
         Config memory c = abi.decode(config, (Config));
         (uint256 tokenId, uint256 minProceeds, address proceedsTo) = abi.decode(input, (uint256, uint256, address));
         if (proceedsTo == address(0)) revert ZeroAddress();
-        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee) = quote(msg.sender, c, tokenId);
+        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo) = quote(msg.sender, c, tokenId);
         uint256 proceeds = price - royalty - fee;
         if (proceeds < minProceeds) revert BelowMinProceeds(proceeds, minProceeds);
 
@@ -80,12 +80,12 @@ contract NFTBid is NFTTrade {
     function quote(address order, Config memory c, uint256 tokenId)
         public
         view
-        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee)
+        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo)
     {
         if (!c.anyToken && tokenId != c.tokenId) revert WrongToken(tokenId);
         price = _currentPrice(c.schedule);
         if (order.balance < price) revert InsufficientFunds(price, order.balance);
-        (fee, royaltyTo, royalty) = _split(order, c.nft, tokenId, price);
+        (feeTo, fee, royaltyTo, royalty) = _split(order, c.nft, tokenId, price);
     }
 
     /// @dev This handler moves the seller's token under the seller's approval to it.

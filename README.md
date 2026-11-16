@@ -43,7 +43,7 @@ Order order = market.create(nftSale, config, salt);
 nft.transferFrom(seller, address(order), 7);            // the order is the escrow
 
 // Buyer: read config from the Created event, quote, fill.
-(uint256 price,,,) = nftSale.quote(address(order), c);
+(uint256 price,,,,) = nftSale.quote(address(order), c);
 order.fill{value: price}(config, abi.encode(buyer, price)); // recipient, max price
 
 // Seller, to cancel instead: close, then recover.

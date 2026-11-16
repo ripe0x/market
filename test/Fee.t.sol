@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Order} from "../src/Order.sol";
+import {FeeConfig} from "../handlers/FeeConfig.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {NFTSale} from "../handlers/NFTSale.sol";
 import {NFTTrade} from "../handlers/NFTTrade.sol";
@@ -34,7 +35,7 @@ contract ReentrantTreasury {
     }
 }
 
-/// The fee on `NFTSale` and `NFTBid` fills: at most 1%, set by `feeTo`, locked per order at creation.
+/// The fee on `NFTSale` and `NFTBid` fills: at most 1%, set by the `FeeConfig` admin, locked per order at creation.
 contract FeeTest is Base {
     RoyaltyNFT art;
     address holder = makeAddr("holder");
@@ -47,19 +48,26 @@ contract FeeTest is Base {
     }
 
     function test_feeTerms() public view {
-        assertEq(sale.MAX_FEE_BPS(), 100);
-        assertEq(sale.feeBps(), 100, "starts at 1%");
-        assertEq(bids.feeBps(), 100);
-        assertEq(sale.feeTo(), treasury);
-        assertEq(bids.feeTo(), treasury);
-        assertEq(address(sale.market()), address(market));
+        assertEq(fees.MAX_FEE_BPS(), 100);
+        assertEq(fees.feeBps(), 100, "starts at 1%");
+        assertEq(fees.recipient(), treasury);
+        assertEq(fees.admin(), feeAdmin);
+        assertEq(address(fees.market()), address(market));
+        assertEq(address(sale.fees()), address(fees));
+        assertEq(address(bids.fees()), address(fees));
     }
 
-    function test_zeroFeeRecipientRejected() public {
-        vm.expectRevert(NFTTrade.ZeroAddress.selector);
-        new NFTSale(market, address(0));
-        vm.expectRevert(NFTTrade.ZeroAddress.selector);
-        new NFTBid(market, address(0));
+    function test_zeroAddressesRejected() public {
+        vm.expectRevert(FeeConfig.ZeroAddress.selector);
+        new FeeConfig(market, address(0), treasury);
+        vm.expectRevert(FeeConfig.ZeroAddress.selector);
+        new FeeConfig(market, feeAdmin, address(0));
+        vm.startPrank(feeAdmin);
+        vm.expectRevert(FeeConfig.ZeroAddress.selector);
+        fees.setRecipient(address(0));
+        vm.expectRevert(FeeConfig.ZeroAddress.selector);
+        fees.setAdmin(address(0));
+        vm.stopPrank();
     }
 
     /// Sale at 1 ETH with a 5% royalty: buyer 1, artist 0.05, fee 0.01, seller 0.94.
@@ -145,38 +153,70 @@ contract FeeTest is Base {
         assertEq(seller.balance, 0);
     }
 
-    function test_onlyFeeToSetsFee() public {
-        vm.prank(seller);
-        vm.expectRevert(NFTTrade.NotFeeTo.selector);
-        sale.setFee(0);
-        vm.prank(treasury);
-        vm.expectRevert(abi.encodeWithSelector(NFTTrade.FeeTooHigh.selector, 101));
-        sale.setFee(101);
-        vm.prank(treasury);
-        vm.expectEmit(address(sale));
-        emit NFTTrade.FeeSet(25, vm.getBlockTimestamp() + 1);
-        sale.setFee(25);
-        assertEq(sale.feeBps(), 25);
-        assertEq(bids.feeBps(), 100, "each handler has its own rate");
+    /// Only the admin changes anything; the recipient, sellers and buyers cannot.
+    function test_onlyAdminChangesTerms() public {
+        address[3] memory others = [treasury, seller, buyer];
+        for (uint256 i; i < 3; ++i) {
+            vm.startPrank(others[i]);
+            vm.expectRevert(FeeConfig.NotAdmin.selector);
+            fees.setFee(0);
+            vm.expectRevert(FeeConfig.NotAdmin.selector);
+            fees.setRecipient(others[i]);
+            vm.expectRevert(FeeConfig.NotAdmin.selector);
+            fees.setAdmin(others[i]);
+            vm.stopPrank();
+        }
+        vm.startPrank(feeAdmin);
+        vm.expectRevert(abi.encodeWithSelector(FeeConfig.FeeTooHigh.selector, 101));
+        fees.setFee(101);
+        vm.expectEmit(address(fees));
+        emit FeeConfig.FeeSet(25, vm.getBlockTimestamp() + 1);
+        fees.setFee(25);
+        vm.stopPrank();
+        assertEq(fees.feeBps(), 25, "one rate for both handlers");
+    }
+
+    /// A new recipient receives the fee of every later fill, including orders created before.
+    function test_recipientChangeAppliesToEveryFill() public {
+        (Order order, bytes memory config) = _listArt(sale, 1 ether, 1000);
+        address next = makeAddr("next treasury");
+        vm.prank(feeAdmin);
+        fees.setRecipient(next);
+        vm.prank(buyer);
+        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
+        assertEq(next.balance, 0.01 ether);
+        assertEq(treasury.balance, 0);
+    }
+
+    function test_adminHandoff() public {
+        address next = makeAddr("next admin");
+        vm.prank(feeAdmin);
+        fees.setAdmin(next);
+        vm.prank(feeAdmin);
+        vm.expectRevert(FeeConfig.NotAdmin.selector);
+        fees.setFee(0);
+        vm.prank(next);
+        fees.setFee(0);
+        assertEq(fees.feeBps(), 0);
     }
 
     /// Each order keeps the rate in force when it was created, through cuts and raises.
     function test_rateLockedAtCreation() public {
         (Order a, bytes memory ca) = _listArtId(1, 1 ether);
-        vm.prank(treasury);
-        sale.setFee(50);
+        vm.prank(feeAdmin);
+        fees.setFee(50);
         (Order sameBlock, bytes memory cs) = _listArtId(2, 1 ether);
         skip(1);
         (Order b, bytes memory cb) = _listArtId(3, 1 ether);
-        vm.prank(treasury);
-        sale.setFee(100);
+        vm.prank(feeAdmin);
+        fees.setFee(100);
         skip(1);
         (Order c, bytes memory cc) = _listArtId(4, 1 ether);
 
-        assertEq(sale.feeBpsOf(address(a)), 100);
-        assertEq(sale.feeBpsOf(address(sameBlock)), 100, "a change applies from the next second");
-        assertEq(sale.feeBpsOf(address(b)), 50);
-        assertEq(sale.feeBpsOf(address(c)), 100);
+        assertEq(fees.feeBpsOf(address(a)), 100);
+        assertEq(fees.feeBpsOf(address(sameBlock)), 100, "a change applies from the next second");
+        assertEq(fees.feeBpsOf(address(b)), 50);
+        assertEq(fees.feeBpsOf(address(c)), 100);
 
         _buyArt(b, cb, 1 ether);
         assertEq(treasury.balance, 0.005 ether, "cut-rate order keeps 0.5% after the raise");
@@ -192,29 +232,29 @@ contract FeeTest is Base {
         uint256[] memory rate = new uint256[](40);
         for (uint256 i; i < 40; ++i) {
             if (i % 3 == 0) {
-                vm.prank(treasury);
-                sale.setFee(uint16(i * 7 % 101));
+                vm.prank(feeAdmin);
+                fees.setFee(uint16(i * 7 % 101));
                 skip(1);
             }
-            rate[i] = sale.feeBps();
+            rate[i] = fees.feeBps();
             (orders[i],) = _listArtId(i + 1, 1 ether);
             skip(i % 2);
         }
         for (uint256 i; i < 40; ++i) {
-            assertEq(sale.feeBpsOf(address(orders[i])), rate[i]);
+            assertEq(fees.feeBpsOf(address(orders[i])), rate[i]);
         }
     }
 
     /// An order deployed outside `Market` has no creation time and pays the latest rate, so a
     /// hand-made clone cannot claim an old, lower rate.
     function test_handMadeOrderPaysLatestRate() public {
-        vm.prank(treasury);
-        sale.setFee(0);
+        vm.prank(feeAdmin);
+        fees.setFee(0);
         skip(1);
         art.mint(seller, 1);
         bytes memory config = abi.encode(NFTSale.Config(art, 1, _fixed(1 ether), seller, 1000));
-        vm.prank(treasury);
-        sale.setFee(100);
+        vm.prank(feeAdmin);
+        fees.setFee(100);
         Order order = Order(
             payable(
                 Clones.cloneWithImmutableArgs(
@@ -224,21 +264,38 @@ contract FeeTest is Base {
             )
         );
         assertEq(market.createdAt(order), 0);
-        assertEq(sale.feeBpsOf(address(order)), 100);
+        assertEq(fees.feeBpsOf(address(order)), 100);
         vm.prank(seller);
         art.transferFrom(seller, address(order), 1);
         _buyArt(order, config, 1 ether);
         assertEq(treasury.balance, 0.01 ether);
     }
 
-    /// A fee recipient that refuses ETH stops every fill; nothing moves and the owner recovers.
-    function test_refusingFeeRecipientBlocksFillsButNotRecovery() public {
-        NFTSale blocked = new NFTSale(market, address(new RefusingTreasury()));
-        (Order order, bytes memory config) = _listArt(blocked, 1 ether, 1000);
+    /// A fee recipient that refuses ETH stops fills until the admin replaces it; the owner can
+    /// still recover meanwhile.
+    function test_refusingFeeRecipientIsReplaceable() public {
+        address refusing = address(new RefusingTreasury());
+        vm.prank(feeAdmin);
+        fees.setRecipient(refusing);
+        (Order order, bytes memory config) = _listArt(sale, 1 ether, 1000);
         vm.prank(buyer);
         vm.expectRevert();
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
         assertEq(art.ownerOf(1), address(order));
+
+        vm.prank(feeAdmin);
+        fees.setRecipient(treasury);
+        vm.prank(buyer);
+        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
+        assertEq(art.ownerOf(1), buyer);
+        assertEq(treasury.balance, 0.01 ether);
+    }
+
+    function test_ownerRecoversWhileFeeRecipientRefuses() public {
+        address refusing = address(new RefusingTreasury());
+        vm.prank(feeAdmin);
+        fees.setRecipient(refusing);
+        (Order order,) = _listArt(sale, 1 ether, 1000);
         vm.startPrank(seller);
         order.close();
         order.execute(address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(order), seller, 1)));
@@ -249,7 +306,7 @@ contract FeeTest is Base {
     /// The fee recipient cannot refill the bid that pays it.
     function test_feeRecipientCannotReenter() public {
         ReentrantTreasury t = new ReentrantTreasury();
-        NFTBid hostile = new NFTBid(market, address(t));
+        NFTBid hostile = new NFTBid(new FeeConfig(market, feeAdmin, address(t)));
         bytes memory config = abi.encode(NFTBid.Config(art, true, 0, _fixed(1 ether), vault, 2));
         vm.deal(seller, 2 ether);
         vm.prank(seller);

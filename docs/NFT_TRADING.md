@@ -73,7 +73,7 @@ Rounding: the movement between the end points rounds down, so the price is never
 **Lifecycle:**
 
 1. Seller: `market.create(nftSale, config, salt)`, then `nft.transferFrom(seller, order, tokenId)`. Or transfer to `market.orderAddress(seller, nftSale, keccak256(config), salt)` first and create after; the address has no code until then, so `safeTransferFrom` makes no callback.
-2. Buyer: `sale.quote(order, config)` for `(price, royaltyTo, royalty, fee)` (the order dates the fee rate), then `order.fill{value: price}(config, abi.encode(recipient, price))`.
+2. Buyer: `sale.quote(order, config)` for `(price, royaltyTo, royalty, fee, feeTo)` (the order dates the fee rate), then `order.fill{value: price}(config, abi.encode(recipient, price))`.
 3. Cancel: `order.close()`, then `order.execute(nft, 0, transferFrom(order, seller, tokenId))`. Stray ETH: `order.execute(seller, amount, "")`.
 
 The order holds no approvals, so nothing remains to revoke after a sale or cancellation.
@@ -101,7 +101,7 @@ The order holds no approvals, so nothing remains to revoke after a sale or cance
 **Lifecycle:**
 
 1. Bidder: `market.create{value: funds}(nftBid, config, salt)`.
-2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty, fee)`; `order.fill(config, abi.encode(tokenId, price - fee - royalty, me))`.
+2. Holder: approve the handler once; `bids.quote(order, config, tokenId)` for `(price, royaltyTo, royalty, fee, feeTo)`; `order.fill(config, abi.encode(tokenId, price - fee - royalty, me))`.
 3. Cancel: `order.close()`, then `order.execute(bidder, address(order).balance, "")`.
 
 ### Both handlers act only inside a genuine fill

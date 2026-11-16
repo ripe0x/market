@@ -6,6 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {Market} from "../../src/Market.sol";
 import {Order} from "../../src/Order.sol";
+import {FeeConfig} from "../../handlers/FeeConfig.sol";
 import {NFTBid} from "../../handlers/NFTBid.sol";
 import {NFTSale} from "../../handlers/NFTSale.sol";
 import {NFTTrade} from "../../handlers/NFTTrade.sol";
@@ -28,6 +29,7 @@ contract NFTForkTest is Test {
     address constant PUNKS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB; // CryptoPunks, not ERC721
 
     Market market;
+    FeeConfig fees;
     NFTSale sale;
     NFTBid bids;
     address buyer = makeAddr("buyer");
@@ -42,8 +44,9 @@ contract NFTForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://mainnet.gateway.tenderly.co")), BLOCK);
         market = new Market();
-        sale = new NFTSale(market, treasury);
-        bids = new NFTBid(market, treasury);
+        fees = new FeeConfig(market, makeAddr("market fork fee admin"), treasury);
+        sale = new NFTSale(fees);
+        bids = new NFTBid(fees);
         vm.deal(buyer, 1000 ether);
         vm.deal(bidder, 1000 ether);
         vm.deal(treasury, 1 ether); // an existing account, like the production Safe

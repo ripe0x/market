@@ -50,8 +50,8 @@ contract GasTest is Base {
     /// An order created before a rate change looks up its rate: one more call and two reads.
     function test_gasNFTSaleAfterRateChange() public {
         (Order order, bytes memory config) = _listSale(seller, 1, 1 ether);
-        vm.prank(treasury);
-        sale.setFee(50);
+        vm.prank(feeAdmin);
+        fees.setFee(50);
         skip(1);
         vm.prank(buyer);
         order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
