@@ -37,7 +37,7 @@ The admin alone can:
 2. `setRecipient(address)`: change where every later fee goes, at once, including fees from orders created earlier.
 3. `setAdmin(address)`: offer the admin role to an account, which takes it with `acceptAdmin()`. Until then nothing changes, and a new offer (or `address(0)`) replaces it.
 
-There are no other fees. A recipient that refuses ETH would stop every fill of that deployment; nothing would be lost, owners would close and recover, and the admin can set a recipient that accepts to restore trading. A compromised admin can at most set 1% on new orders and redirect future fees; it cannot touch order assets or the rate of orders already created (residual risk 23). The admin is currently the deployer EOA, not a Safe. Applications that want a split can pay `proceedsTo` into a splitter.
+There are no other fees. A recipient that refuses ETH would stop every fill of that deployment; nothing would be lost, owners would close and recover, and the admin can set a recipient that accepts to restore trading. A compromised admin can at most set 1% on new orders and redirect future fees; it cannot touch order assets or the rate of orders already created (residual risk 23). The admin is a keystore key (the deployer), by the owner's choice. Applications that want a split can pay `proceedsTo` into a splitter.
 
 ## Price schedule
 
