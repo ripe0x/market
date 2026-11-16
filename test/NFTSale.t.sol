@@ -57,23 +57,26 @@ contract NFTSaleTest is Base {
 
         assertEq(art.ownerOf(1), recipient, "token delivered");
         assertEq(royalty.balance, 0.1 ether, "5% royalty");
-        assertEq(proceeds.balance, 1.9 ether, "seller proceeds");
+        assertEq(treasury.balance, 0.01 ether, "0.5% fee");
+        assertEq(proceeds.balance, 1.89 ether, "seller proceeds");
         assertEq(buyerBefore - buyer.balance, 2 ether, "buyer spends the price, excess refunded");
         assertEq(address(order).balance, 0, "order keeps nothing");
         assertEq(address(sale).balance, 0, "handler keeps nothing");
         assertTrue(order.closed(), "single use");
-        (uint256 price, uint256 paidRoyalty) = abi.decode(ret, (uint256, uint256));
+        (uint256 price, uint256 paidRoyalty, uint256 fee) = abi.decode(ret, (uint256, uint256, uint256));
         assertEq(price, 2 ether);
         assertEq(paidRoyalty, 0.1 ether);
+        assertEq(fee, 0.01 ether);
     }
 
     function test_fallingPrice() public {
         (Order order, bytes memory config) = _list(_schedule(10 ether, 1 ether, 1000, 0), 1000);
         skip(250);
-        (uint256 price,,) = sale.quote(abi.decode(config, (NFTSale.Config)));
+        (uint256 price,,,) = sale.quote(abi.decode(config, (NFTSale.Config)));
         assertEq(price, 7.75 ether);
         _buy(order, config, price, price);
-        assertEq(proceeds.balance, 7.75 ether * 95 / 100);
+        assertEq(proceeds.balance, 7.75 ether * 95 / 100 - 7.75 ether / 200, "less 5% royalty and 0.5% fee");
+        assertEq(treasury.balance, 0.03875 ether);
     }
 
     function test_priceHoldsAtEndPrice() public view {
@@ -129,7 +132,7 @@ contract NFTSaleTest is Base {
         vm.prank(seller);
         nft.transferFrom(seller, address(order), 7);
         _buy(order, config, 1 ether, 1 ether);
-        assertEq(proceeds.balance, 1 ether);
+        assertEq(proceeds.balance, 0.995 ether);
         assertEq(nft.ownerOf(7), recipient);
     }
 
@@ -302,11 +305,11 @@ contract NFTSaleTest is Base {
     function testFuzz_settlementConserves(uint96 startPrice, uint96 endPrice, uint32 duration, uint32 wait, uint96 extra, uint16 bps)
         public
     {
-        bps = uint16(bound(bps, 0, 10_000));
+        bps = uint16(bound(bps, 0, 9_950)); // above 99.5% the royalty leaves less than the fee
         art.setRoyalty(royalty, bps);
         (Order order, bytes memory config) = _list(_schedule(startPrice, endPrice, duration, 0), 10_000);
         skip(wait);
-        (uint256 price,, uint256 r) = sale.quote(abi.decode(config, (NFTSale.Config)));
+        (uint256 price,, uint256 r, uint256 f) = sale.quote(abi.decode(config, (NFTSale.Config)));
         uint256 lo = startPrice < endPrice ? startPrice : endPrice;
         uint256 hi = startPrice < endPrice ? endPrice : startPrice;
         assertGe(price, lo);
@@ -316,8 +319,10 @@ contract NFTSaleTest is Base {
         _buy(order, config, value, price);
         assertEq(buyer.balance, extra, "buyer pays exactly the price");
         assertEq(royalty.balance, r);
-        assertEq(proceeds.balance, price - r);
+        assertEq(treasury.balance, f);
+        assertEq(proceeds.balance, price - r - f);
         assertEq(r, price * bps / 10_000);
+        assertEq(f, price * 50 / 10_000);
         assertEq(address(order).balance, 0);
     }
 }

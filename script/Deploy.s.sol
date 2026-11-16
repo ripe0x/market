@@ -13,6 +13,8 @@ import {PaintAction} from "../examples/PaintAction.sol";
 /// are the same on every chain.
 abstract contract Addresses is Script {
     bytes32 constant SALT = keccak256("market.v1");
+    /// @notice Receives the 0.5% fee of every NFTSale and NFTBid fill, forever. Set before deploying.
+    address constant FEE_TO = address(0);
 
     function _at(bytes memory initCode) internal pure returns (address) {
         return vm.computeCreate2Address(SALT, keccak256(initCode));
@@ -23,11 +25,11 @@ abstract contract Addresses is Script {
     }
 
     function nftSale() internal pure returns (NFTSale) {
-        return NFTSale(_at(abi.encodePacked(type(NFTSale).creationCode, abi.encode(market()))));
+        return NFTSale(_at(abi.encodePacked(type(NFTSale).creationCode, abi.encode(market(), FEE_TO))));
     }
 
     function nftBid() internal pure returns (NFTBid) {
-        return NFTBid(_at(abi.encodePacked(type(NFTBid).creationCode, abi.encode(market()))));
+        return NFTBid(_at(abi.encodePacked(type(NFTBid).creationCode, abi.encode(market(), FEE_TO))));
     }
 
     function fillVerifier() internal pure returns (FillVerifier) {
@@ -51,10 +53,11 @@ abstract contract Addresses is Script {
 /// the owner's explicit approval.
 contract Deploy is Addresses {
     function run() external {
+        require(FEE_TO != address(0), "set FEE_TO");
         vm.startBroadcast();
         if (_absent(address(market()))) new Market{salt: SALT}();
-        if (_absent(address(nftSale()))) new NFTSale{salt: SALT}(market());
-        if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(market());
+        if (_absent(address(nftSale()))) new NFTSale{salt: SALT}(market(), FEE_TO);
+        if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(market(), FEE_TO);
         if (_absent(address(fillVerifier()))) new FillVerifier{salt: SALT}();
         vm.stopBroadcast();
 

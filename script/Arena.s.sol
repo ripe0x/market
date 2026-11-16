@@ -420,18 +420,18 @@ contract Arena is Addresses {
         (Order saleOrder, Order bidOrder) = orders(id, c, start);
         bytes memory sc = saleConfig(c, start);
         bytes memory bc = bidConfig(c, start);
-        (uint256 ask,,) = nftSale().quote(abi.decode(sc, (NFTSale.Config)));
-        (uint256 offer,, uint256 royalty) = nftBid().quote(address(bidOrder), abi.decode(bc, (NFTBid.Config)), 1);
-        require(offer - royalty > ask, "prices have not crossed yet");
+        (uint256 ask,,,) = nftSale().quote(abi.decode(sc, (NFTSale.Config)));
+        (uint256 offer,, uint256 royalty, uint256 fee) = nftBid().quote(address(bidOrder), abi.decode(bc, (NFTBid.Config)), 1);
+        require(offer - royalty - fee > ask, "prices have not crossed yet");
         vm.startBroadcast(msg.sender);
-        c.matcher.matchSaleToBid{value: ask}(saleOrder, sc, ask, bidOrder, bc, c.nft, 1, offer - royalty, 0);
+        c.matcher.matchSaleToBid{value: ask}(saleOrder, sc, ask, bidOrder, bc, c.nft, 1, offer - royalty - fee, 0);
         c.holder.act(address(bidOrder), 0, abi.encodeCall(Order.fill, (bc, abi.encode(uint256(2), uint256(0), address(c.holder)))));
         vm.stopBroadcast();
         require(c.nft.ownerOf(1) == address(c.bidder) && c.nft.ownerOf(2) == address(c.bidder), "delivery");
         require(saleOrder.closed() && bidOrder.closed(), "orders closed");
         console.log("ask", ask);
         console.log("offer", offer);
-        console.log("matcher spread", offer - royalty - ask);
+        console.log("matcher spread", offer - royalty - fee - ask);
     }
 
     function cleanup(uint256 id, uint256 start) external {

@@ -13,7 +13,7 @@ import {NFTTrade} from "./NFTTrade.sol";
 /// A holder approves this handler, not the order, for the token (`approve` or
 /// `setApprovalForAll`), and fills with
 /// `abi.encode(uint256 tokenId, uint256 minProceeds, address proceedsTo)`. The token goes from
-/// the holder straight to `recipient`; `proceedsTo` receives `price - royalty`, and the fill
+/// the holder straight to `recipient`; `proceedsTo` receives `price - royalty - fee`, and the fill
 /// reverts if that is below `minProceeds`, so a stale quote or a changed royalty cannot pay less
 /// than the holder accepted. The order pays exactly the scheduled price, never more: that is
 /// the bidder's limit.
@@ -48,7 +48,7 @@ contract NFTBid is NFTTrade {
     error InsufficientFunds(uint256 price, uint256 balance);
     error BelowMinProceeds(uint256 proceeds, uint256 minProceeds);
 
-    constructor(Market market) NFTTrade(market) {}
+    constructor(Market market, address feeTo_) NFTTrade(market, feeTo_) {}
 
     function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
         external
@@ -60,17 +60,19 @@ contract NFTBid is NFTTrade {
         Config memory c = abi.decode(config, (Config));
         (uint256 tokenId, uint256 minProceeds, address proceedsTo) = abi.decode(input, (uint256, uint256, address));
         if (proceedsTo == address(0)) revert ZeroAddress();
-        (uint256 price, address royaltyTo, uint256 royalty) = quote(msg.sender, c, tokenId);
-        if (price - royalty < minProceeds) revert BelowMinProceeds(price - royalty, minProceeds);
+        (uint256 price, address royaltyTo, uint256 royalty, uint256 fee) = quote(msg.sender, c, tokenId);
+        uint256 proceeds = price - royalty - fee;
+        if (proceeds < minProceeds) revert BelowMinProceeds(proceeds, minProceeds);
 
         // Count and, on the last fill, close before any external call.
         uint256 n = ++fills[msg.sender];
         if (n >= c.maxFills) _close();
         _deliver(c.nft, caller, c.recipient, tokenId);
         _sendETH(royaltyTo, royalty);
-        _sendETH(proceedsTo, price - royalty);
+        _sendETH(feeTo, fee);
+        _sendETH(proceedsTo, proceeds);
         emit Bought(msg.sender, caller, tokenId, price, royalty);
-        return abi.encode(price, royalty);
+        return abi.encode(price, royalty, fee);
     }
 
     /// @notice What `order` would pay now for `tokenId` and how it splits; reverts when a fill
@@ -78,12 +80,13 @@ contract NFTBid is NFTTrade {
     function quote(address order, Config memory c, uint256 tokenId)
         public
         view
-        returns (uint256 price, address royaltyTo, uint256 royalty)
+        returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee)
     {
         if (!c.anyToken && tokenId != c.tokenId) revert WrongToken(tokenId);
         price = _currentPrice(c.schedule);
         if (order.balance < price) revert InsufficientFunds(price, order.balance);
         (royaltyTo, royalty) = royaltyOf(c.nft, tokenId, price);
+        fee = feeOf(price);
     }
 
     /// @dev This handler moves the seller's token under the seller's approval to it.

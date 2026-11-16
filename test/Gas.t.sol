@@ -20,6 +20,9 @@ contract GasTest is Base {
         super.setUp();
         art = new RoyaltyNFT();
         art.setRoyalty(royalty, 500);
+        // The fee recipient is an existing account (a Safe) in production, so the first fee does
+        // not pay the 25,000 gas of creating it.
+        vm.deal(treasury, 1 ether);
     }
 
     function test_gasNFTSale() public {
