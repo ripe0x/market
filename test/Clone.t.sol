@@ -197,8 +197,8 @@ contract CloneTest is Base {
 
     /// An EIP-7702 account's code is a pointer its key holder can change, so it cannot be a handler.
     function test_createRejectsDelegatedAccount() public {
-        address delegated = makeAddr("delegated");
-        vm.etch(delegated, abi.encodePacked(hex"ef0100", address(probe)));
+        (address delegated, uint256 key) = makeAddrAndKey("delegated");
+        vm.signAndAttachDelegation(address(probe), key);
         vm.expectRevert(Market.DelegatedHandler.selector);
         market.create(IOrderHandler(delegated), "", 0);
     }

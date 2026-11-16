@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-11. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
+Updated 2026-11-16. Owner decisions 1, 3, 4, 7 and 8 recorded in DECISIONS.md. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
 
 ## State
 
@@ -72,6 +72,6 @@ The fill authentication added to `NFTSale` (S1) costs 2,531 gas per sale fill on
 
 ## Next actions
 
-1. Owner decisions in DECISIONS.md, Owner review (items 1, 3, 4, 7, 8 open).
+1. Owner approval of the money outcomes, with numbers, for the economic pass (none written yet).
 2. Mainnet: the checklist in [DEPLOYMENT.md](DEPLOYMENT.md#mainnet-release-checklist), then the owner's explicit approval.
 3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.
