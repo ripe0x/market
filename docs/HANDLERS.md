@@ -1,6 +1,6 @@
 # Building on Market
 
-A guide for Solidity developers who want to write an OrderHandler, create orders, or fill orders they did not write. You need this page, [`src/Order.sol`](../src/Order.sol) and [`src/Market.sol`](../src/Market.sol) (206 lines together). The rest of the repository is examples and evidence.
+A guide for Solidity developers writing handlers for cancelable orders or transferable execution rights. The order walkthrough below remains valid; rights use a separate account and handler interface.
 
 > **Experimental, unaudited.** Read [SECURITY.md](SECURITY.md) before putting value in an order.
 
@@ -170,6 +170,31 @@ The lifecycle, with the permission held by the order and granted by an independe
 4. If nobody buys, the owner closes the order and takes the permission back: `order.close()`, then `order.execute(art, 0, resign(tokenId))`, or simply calls `art.setPainter` again from the token.
 
 Nothing in Market knows what an artwork, a color or a painter is. The same `Market` and `Order` that escrow an NFT for `NFTSale` here hold a role in another contract, and the same lifecycle rules decide who can use it. Tests: [`test/PaintAction.t.sol`](../test/PaintAction.t.sol) (11 tests, including that the role is consumed after one paint, that a transfer of the token makes the offer stale, that closing leaves the role until revoked, and that the creator can revoke without touching the order). Real transactions: the `paint` step of [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol).
+
+## Write an exercise handler
+
+`Market.createRight` binds a right account to `IExerciseHandler`, its code hash, the config hash, a deadline and a residual beneficiary. The account starts pending with **no** generic issuer execution. Put assets or target-enforced permissions into it from outside, then have the issuer call `activate(config)`. Activation calls:
+
+```solidity
+function validate(address account, bytes calldata config) external view returns (bytes memory terms);
+```
+
+Validate required backing at `account` and return the effective terms that must not change after transfer. The core stores those exact bytes at `Right.activationTerms()`. For a covered NFT, check `ownerOf` and resolve the ERC2981 recipient and amount now, subject to the issuer's configured limit. A revocable approval from another account is not durable backing. A target-enforced reservation may be, if its target prevents owner revocation, replacement and consumption until the committed termination conditions.
+
+Only the actual `Rights.ownerOf(id)` may call `Right.exercise(config, input)`. The core checks state, deadline, config, handler code and the local execution lock, then calls:
+
+```solidity
+function onExercise(
+    address holder, uint256 value, bytes calldata config,
+    bytes calldata terms, bytes calldata input
+) external returns (bytes memory result);
+```
+
+The authenticated holder is a snapshot, and `value` is the ETH just sent to the right account. The handler must additionally authenticate `msg.sender` as a Market-created right bound to itself and currently `exercising()`. Do this before any shared handler authority, state update or settlement event. Construct all target addresses and calldata from committed config and validated input. Act only through `Right(payable(msg.sender)).execute(...)`, key any state to `msg.sender`, and verify delivery through target state. A successful return consumes the one-use entitlement; a revert restores it. For ETH proceeds call `Right.credit(beneficiary, amount)` and leave the ETH in that isolated account. The beneficiary calls `withdrawCredit(recipient)` later. Do not make successful exercise depend on a payable callback to the issuer, royalty receiver or trading `FeeConfig`.
+
+The account can make several handler-directed calls in one exercise. Its local lock blocks its own token transfer, surrender, expiry finalization, recovery and reentrant exercise while allowing nested activity in a different right account. Never substitute `Order.fill` for purchase or exercise: an NFTSale fill transfers a right token; `Right.exercise` performs the operation. Never send an untrusted counterparty to approve the account itself. After a right terminates, its residual beneficiary can call generic `recover`; such an approval would become the beneficiary's spending authority. Also make the external target consume or disable a permission that should end with the right. The core cannot revoke it for you.
+
+Supported examples: [`CoveredNFTPurchase`](../handlers/CoveredNFTPurchase.sol) fixes NFT custody, price and exercise royalty; [`ReservedPaint`](../examples/ReservedPaint.sol) uses a reservation enforced by [`Artwork`](../examples/Artwork.sol). `PaintAction` uses a different, revocable painter role for immediate order fills and is not suitable collateral for a transferable prepaid right. See [SPEC.md](SPEC.md#rights-a-separate-protocol-object) and [SECURITY.md](SECURITY.md#transferable-rights-security-model).
 
 ## Filling an order you did not write
 

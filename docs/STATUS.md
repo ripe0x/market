@@ -1,8 +1,42 @@
 # Status
 
-Updated 2026-11-16. Owner decisions 1, 3, 4, 7 and 8 recorded in DECISIONS.md. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
+Updated 2026-11-17. Transferable-rights candidate on `codex/transferable-rights`, based on `79120eb`. The candidate is local only; no redesigned contract has been broadcast. Earlier Sepolia records below remain historical evidence for the order-only release.
 
-## State
+## Transferable-rights candidate
+
+The redesign adds isolated `Right` accounts, canonical `Rights` ERC721 ownership, activation validation, fixed exercise terms, terminal recovery and per-account ETH payment credits. `CoveredNFTPurchase` and `ReservedPaint` are the two reference handlers. Existing orders, immediate PaintAction, and the direct NFT trading policy remain. **Experimental and unaudited.** No production compatibility claim is made for the new addresses.
+
+| Check | Exact command and result | Limit |
+| --- | --- | --- |
+| Formatting and compilation | `forge fmt --check` on changed Solidity files and `forge build --sizes`: exit 0. Runtime bytes: Market 2,325, Order 2,133, Right 6,014, Rights 4,673, CoveredNFTPurchase 3,377, NFTSale 3,778, NFTBid 4,056, ReservedPaint 2,318, Artwork 5,155. | All below the 24,576-byte runtime limit; Market initcode 16,589 bytes. |
+| Local suite | `CANDIDATE_RUN=1 forge test --no-match-path 'test/fork/*' --summary`: exit 0, 202 passed, 0 failed across 24 suites, including final adversarial tests. | Fork suites ran separately through public Tenderly RPC. |
+| Mainnet fork | `MAINNET_RPC_URL=https://mainnet.gateway.tenderly.co SEPOLIA_RPC_URL=https://sepolia.gateway.tenderly.co forge test --match-path 'test/fork/*' --isolate`: 14 mainnet tests passed at block 26,357,000. | Pinned historical collections; fork actors are impersonated. |
+| Historical Sepolia fork | `SEPOLIA_RPC_URL=https://sepolia.gateway.tenderly.co forge test --match-path test/fork/SepoliaLive.t.sol --isolate`: 7 passed at block 12,150,234, including the legacy arena and the explicit old/new bytecode distinction. | These deployed contracts have no native rights. |
+| Deep invariants | `FOUNDRY_INVARIANT_RUNS=1000 FOUNDRY_INVARIANT_DEPTH=128 forge test --match-path 'test/*Invariant.t.sol' --summary`: both campaigns passed, 128,000 calls each, zero driver reverts. Rights properties: backing while active, one entitlement, issuer bypass refusal and payment liabilities. | Stateful local paths, not a proof over all handlers or external contracts. |
+| Local demonstrations | `forge script script/RightsLifecycle.s.sol:RightsLifecycle --sig 'run()'`: exit 0; covered right sold, resold, exercised, and separately expired and recovered; artwork right sold, resold and exercised after artwork transfer. | Script uses local cheatcodes, not real signed transactions. |
+| Deployment simulations | Local `forge script script/Deploy.s.sol:Deploy --sig 'run()'`: exit 0, 7,810,554 simulated gas; `examples()`: exit 0, 1,007,406 simulated gas. Read-only `forge script script/Deploy.s.sol:Deploy --sig 'run()' --rpc-url https://mainnet.gateway.tenderly.co`: exit 0, 9,915,632 estimated gas on a mainnet simulation. | No signer or broadcast. The initial sandbox attempt failed DNS; the approved read-only retry succeeded. This is not a transaction rehearsal. |
+| Static analysis | Slither 0.11.5, 101 detectors over 29 contracts: 24 reported results, triaged below. | Detector output is not an audit. |
+| Rights gas | `forge test --match-path 'test/*Gas.t.sol' --isolate --summary`: 8 tests passed; `snapshots/RightsGasTest.json` and `snapshots/GasTest.json`. | Local Prague / solc 0.8.30 / via-IR / 200 optimizer runs; gas price and basefee are not modeled. |
+
+### Economic flow scorecard
+
+These are acceptance examples from executed local paths, not owner-approved launch limits. Each right has its own custody and credit balance. The direct NFT sale policy remains the historical O1–O5; right-token premiums use that trading layer, while exercise does not.
+
+| Regime | Input and destination | State after the round trip |
+| --- | --- | --- |
+| Primary sale and resale | One NFT stays in its backing account through 0.2 ETH and 0.3 ETH right-token premiums. At 1% trading fee, sellers receive 0.198 and 0.297 ETH; fee recipient receives 0.002 and 0.003 ETH. | Final holder pays 1 ETH to exercise. With royalty fixed at activation at 5%, the account credits 0.05 ETH to royalty recipient and 0.95 ETH to issuer's proceeds beneficiary, delivers the NFT and burns the token. Withdrawal takes both credits to zero; residual gets no part of the exercise payment. |
+| No buyer, then expiry | One NFT, zero premiums and zero exercise payment. Listing cancellation returns only the token; at the right deadline anyone burns it by finalizing. | Committed residual beneficiary recovers the one NFT. No exercise credit or trading fee arises. |
+| Maximum configured royalty | One NFT, 1 ETH exercise payment, ERC2981 at the issuer's 100% limit. | Royalty credit 1 ETH, issuer proceeds credit 0; residual cannot recover the reserved ETH. |
+| Refusing royalty beneficiary | One NFT, 1 ETH exercise payment, royalty receiver rejects ETH. | Exercise succeeds with 0.05 ETH royalty and 0.95 ETH proceeds credits; a beneficiary contract needs a callable withdrawal path to choose an accepting recipient. |
+| Failed delivery | A hostile NFT moves then lies about delivery. | The whole transaction reverts: NFT remains backing, holder retains token and 1 ETH, credits remain zero. |
+
+At the measured local gas units, create plus activate is 355,217 gas paid by the issuer, transfer 71,260 by the holder, premium sale 190,738 by the buyer, exercise 201,357 by the holder, expiry finalization 52,062 by its caller, and NFT recovery 72,917 by the residual beneficiary. At a **hypothetical** 1 gwei gas price those costs are 0.000355217, 0.000071260, 0.000190738, 0.000201357, 0.000052062 and 0.000072917 ETH respectively; at 100 gwei they are 100 times higher. No test modeled inclusion prices or participant margin. Setup plus activation is 35.5% of a 0.1 ETH primary premium at 100 gwei, so real trading economics require live gas and premium data before launch.
+
+Slither triage: `arbitrary-send-eth` on `Right._call` and `Order.execute` reflects the explicitly authorized handler or terminal recovery call; the right checks `balance - totalCredits`. `locked-ether` on Market reflects value forwarded to an isolated account; a perpetual right can intentionally hold funds indefinitely. `reentrancy-no-eth` on `Right.exercise` and `Order.fill` is bounded by local transient locks; the rights tests reenter transfer, surrender, recovery and exercise and check credit solvency. `reentrancy-events` concerns log order after external calls; state and payout assertions use contract state. Timestamp findings are the explicit deadline policy, tested at the exact boundary. Assembly and low-level calls are the clone argument reader, revert bubbling and authorized ETH transfers. No reported detector established an actionable bypass in the tested supported paths.
+
+Remaining before a real deployment: independent human security and economic review, live gas and user-margin checks, a real-transaction rehearsal of the redesigned deployment and both rights lifecycles, a current-block fork check, a canary plan and explicit owner authority for any broadcast. The existing `script/rehearse.sh` covers the historical order lifecycle only. No arbitrary handler or external NFT/target is certified by these tests.
+
+## Historical order-only state and evidence
 
 Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
 
@@ -67,7 +101,7 @@ Whole-transaction gas, isolated runs, local mocks (`snapshots/GasTest.json`). Re
 
 The fill authentication added to `NFTSale` (S1) costs about 2,500 gas per sale fill on the fork. The fee (D305, D307) adds about 12,000 per fill when the recipient already exists, 25,000 more if it does not; moving the fee terms into the shared `FeeConfig` (D309) adds about 5,100 more per fill than the per-handler rate of the previous revision (an external call and its cold storage reads). Recording the creation time (D306) adds about 22,200 to each create (one cold `SSTORE`). Once the rate has been changed, each fill looks up its order's creation time and searches the rate history by binary search: the fixed sale costs 150,995 after one rate change against 143,176 before any.
 
-## Not verified
+## Historical release limitations
 
 1. No human audit. AI reviews and Slither only (SECURITY.md).
 2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
@@ -75,8 +109,4 @@ The fill authentication added to `NFTSale` (S1) costs about 2,500 gas per sale f
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
 5. Sepolia runs used contracts controlled by one signer and test collections; no third-party wallets, independent fillers or real collections on a public chain.
 
-## Next actions
-
-1. Economic pass against the approved outcomes O1 to O10 in [OWNER-REQUIREMENTS.md](../OWNER-REQUIREMENTS.md): flow breakdown under each regime and a one-screen scorecard.
-2. Mainnet: the checklist in [DEPLOYMENT.md](DEPLOYMENT.md#mainnet-release-checklist), then the owner's explicit approval.
-3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.
+The historical list above does not establish readiness for the right-enabled candidate. Its remaining checks are listed in the current candidate section at the top of this page.

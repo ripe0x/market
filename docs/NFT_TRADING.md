@@ -12,6 +12,16 @@
 | [`handlers/FeeConfig.sol`](../handlers/FeeConfig.sol) | Shared fee terms both handlers read: recipient and rate history, with a separate admin that sets the rate, the recipient and the next admin |
 | [`handlers/HandlerBase.sol`](../handlers/HandlerBase.sol) | Helpers every handler here uses: `_exec`, `_sendETH`, `_close` |
 
+## Trading canonical right tokens
+
+`NFTSale` can escrow a live `Rights` token and sell it for a premium. The backing remains in its separate `Right` account and its config, exercise price, royalty terms and deadline do not change. The issuer may list the token it initially receives; a buyer may relist it. Each listing's `proceedsTo` receives its own premium net of the ordinary trading fee. Resale does not automatically pay the original issuer. `Order.close` cancels only the listing; its owner then recovers the token through `Order.execute`. The sale order is the actual ERC721 owner while it holds the token, so its former holder cannot exercise it.
+
+The canonical rights collection does not advertise ERC2981. Its premium sales therefore pay the ordinary NFT trading fee but no automatic underlying-NFT royalty. The covered NFT's royalty recipient and amount are committed during right activation and credited from the **exercise payment** once. The right's fixed exercise price is separate from each premium and exercise does not read `FeeConfig`.
+
+`NFTBid` supports a bid for **one named right token ID** (`anyToken = false`). It rejects `anyToken = true` for the canonical rights collection: tokens in the same collection may have different backing, exercise prices and deadlines. The seller approves `NFTBid`, not the bid order, and calls `fill` under the normal seller minimum protection. There is no generalized right criterion in this version.
+
+Both sale and bid quotes reject a pending, expired or terminal canonical claim. `Rights` independently refuses its transfer at or after the deadline, including when no one has finalized expiry. A trading order's own `schedule.expiry` should precede the right's deadline by a deliberate exercise window. This is a listing author's choice; generic NFT trading does not ensure that a buyer gets enough time. Query `Right.deadline()`, `configHash()`, `activationTerms()` and the `RightCreated` config before paying. Deadline zero means perpetual commitment, not an issuer cancellation option.
+
 ## Money terms
 
 The same in both handlers:
@@ -170,17 +180,17 @@ Not covered: ERC1155, ERC20 payment, criteria other than one token or a whole co
 
 ## Gas
 
-Whole-transaction gas, isolated runs on the fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account). The fee recipient is an existing account; paying the fee adds about 12,000 gas per fill, and recording the creation time adds about 22,000 to each create (D306). Reading the rate and recipient from the shared `FeeConfig` (D309) adds about 5,100 per fill; once the rate has been changed, an order created earlier also looks up its creation time (binary search over the rate history).
+Whole-transaction gas for the right-enabled source, isolated runs on the pinned mainnet fork (`forge test --match-path test/fork/NFTFork.t.sol --isolate`, `snapshots/NFTFork.json`). Includes 21,000 base, calldata and first-time account creation for new recipients (up to 25,000 per new account). The fee recipient is an existing account; paying the fee adds about 12,000 gas per fill, and recording the creation time adds about 22,000 to each create (D306). Reading the rate and recipient from the shared `FeeConfig` (D309) adds about 5,100 per fill; once the rate has been changed, an order created earlier also looks up its creation time (binary search over the rate history). The new canonical-rights check adds a small amount to direct NFT trading gas; the 2026-11-16 release's lower measurements remain in [STATUS.md](STATUS.md).
 
 | Operation | Gas |
 | --- | --- |
-| Create a listing | 117,414 |
+| Create a listing | 117,761 |
 | Deposit the token into the listing | 67,026 (Azuki) to 110,187 (BAYC) |
-| Create a funded bid | 117,805 |
-| Sale fill, no royalty | 187,358 (Azuki) to 241,751 (BAYC) |
-| Sale fill with royalty | 207,694 (Moonbirds 1%) to 234,465 (Chimpers 5.5%, splitter) |
-| Bid fill, no royalty | 154,608 (Azuki) to 209,322 (BAYC) |
-| Bid fill with royalty | 187,480 (Opepen 2.5%) to 196,524 (Chimpers) |
+| Create a funded bid | 118,152 |
+| Sale fill, no royalty | 187,515 (Azuki) to 241,908 (BAYC) |
+| Sale fill with royalty | 207,851 (Moonbirds 1%) to 234,622 (Chimpers 5.5%, splitter) |
+| Bid fill, no royalty | 154,852 (Azuki) to 209,566 (BAYC) |
+| Bid fill with royalty | 187,724 (Opepen 2.5%) to 196,768 (Chimpers) |
 | Close | 47,129 |
 | Recover the NFT from a closed sale | 54,705 |
 | Recover the ETH from a closed bid | 34,685 |
@@ -197,7 +207,7 @@ Seaport 1.6 fills of single orders sent directly to Seaport in mainnet blocks 26
 What the numbers mean:
 
 1. **Fills cost about the same.** Market fills sit inside Seaport's single-order range: around the median of advanced orders, with a no-royalty BAYC sale near its top. Market's fill pays for the clone's `delegatecall`, closing a single-use order (about 22,000 for the first write of `closed`), the `ownerOf` delivery checks, the genuine-fill check (about 2,500), the fee rate and recipient lookup in the shared `FeeConfig` (about 5,100) and the fee transfer (about 12,000). Seaport's own fee, where a marketplace adds one, is an extra transfer too.
-2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (117,414) plus a transaction moving the token into escrow (67,026 to 110,187), about 184,000 to 228,000 in all; a Market bid costs one create with its ETH (117,805). At 1 gwei that is about 0.0002 ETH per order. The create is about 22,000 higher than before D306, which records the creation time.
+2. **Placing an order costs gas on Market and nothing on Seaport.** A Seaport listing or offer is an offchain signature plus a one-time approval. A Market listing costs a create (117,761) plus a transaction moving the token into escrow (67,026 to 110,187), about 185,000 to 228,000 in all; a Market bid costs one create with its ETH (118,152). At a hypothetical 1 gwei that is about 0.0002 ETH per order. The create is about 22,000 higher than before D306, which records the creation time.
 3. **What the gas buys.** The order exists onchain with its funds or token escrowed, so it needs no offchain order book, cannot be filled after it is unfunded or the token has moved elsewhere, and can be discovered from `Market.Created` events alone. Seaport's offers are cheaper to place and can be over-subscribed against one WETH balance; a Market bid escrows exactly what it can spend.
 4. **Escrow tradeoff.** A listed NFT is in its order, not the seller's wallet. Other marketplaces will not show it as the seller's, and it cannot be listed elsewhere at the same time.
 

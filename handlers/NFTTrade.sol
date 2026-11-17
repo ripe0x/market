@@ -8,6 +8,7 @@ import {Market} from "../src/Market.sol";
 import {Order} from "../src/Order.sol";
 import {FeeConfig} from "./FeeConfig.sol";
 import {HandlerBase} from "./HandlerBase.sol";
+import {Rights} from "../src/Rights.sol";
 
 /// @title NFTTrade
 /// @notice Pricing, ERC2981 royalties and ERC721 delivery shared by `NFTSale` and `NFTBid`.
@@ -44,8 +45,10 @@ abstract contract NFTTrade is HandlerBase {
     error BadRoyalty(address receiver, uint256 royalty, uint256 price);
     error NotDelivered();
     error NotAFill();
+    error RightNotLive();
     /// @notice The fee recipient and rates, shared by both NFT handlers.
     FeeConfig public immutable fees;
+    Rights public immutable canonicalRights;
 
     /// @dev Hash of the 45 byte ERC-1167 proxy code delegating to Market's order implementation.
     /// Any account whose code starts with it runs `Order`, whoever deployed it, so its `fill`
@@ -56,8 +59,11 @@ abstract contract NFTTrade is HandlerBase {
 
     constructor(FeeConfig fees_) {
         fees = fees_;
+        canonicalRights = fees_.market().rights();
         proxyHash = keccak256(
-            abi.encodePacked(hex"363d3d373d3d3d363d73", fees_.market().implementation(), hex"5af43d82803e903d91602b57fd5bf3")
+            abi.encodePacked(
+                hex"363d3d373d3d3d363d73", fees_.market().implementation(), hex"5af43d82803e903d91602b57fd5bf3"
+            )
         );
     }
 
@@ -88,6 +94,10 @@ abstract contract NFTTrade is HandlerBase {
         if (block.timestamp < s.startTime) revert NotStarted(s.startTime);
         if (s.expiry != 0 && block.timestamp >= s.expiry) revert Expired(s.expiry);
         return priceAt(s, block.timestamp);
+    }
+
+    function _requireLiveRight(IERC721 nft, uint256 tokenId) internal view {
+        if (address(nft) == address(canonicalRights) && !canonicalRights.isLive(tokenId)) revert RightNotLive();
     }
 
     /// @notice The schedule's price at time `t`, ignoring the fill window. Between the end

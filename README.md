@@ -1,23 +1,26 @@
 # Market
 
-Market is a permissionless Ethereum protocol for trading authorized onchain executions.
+Market is a permissionless Ethereum protocol for immediate onchain executions and transferable rights to execute later.
 
-Someone who can make something happen onchain (transfer an NFT, spend ETH, repaint an artwork, call any contract) turns that ability into an **order**: an independent account holding the authority, bound to code that says on what terms anyone may use it. Anyone can **fill** the order by meeting those terms. The execution and its payment settle in one transaction or not at all.
+An **order** is a cancelable offer that executes when filled. A **right** is a transferable entitlement backed by its own account: acquiring or reselling its ERC721 token does not execute the operation. The current token owner may exercise it once under committed conditions, or it may expire or be surrendered.
 
-The core is two small contracts with no owner, no fees, no registry, no upgrade path and no knowledge of what is traded. The reference NFT handlers charge a fee of up to 1% per fill, set per order when the order is created.
+The core has no owner, fee, registry or upgrade path. The reference NFT trading handlers charge a fee of up to 1% per fill, set per order when the order is created. Exercise of a covered NFT purchase right has no trading fee.
 
 > **Status: experimental, unaudited.** Tests and automated reviews are evidence about tested behaviour, not a safety claim ([docs/STATUS.md](docs/STATUS.md), [docs/SECURITY.md](docs/SECURITY.md)). Nothing is deployed to mainnet.
 
 ## How it works
 
-**Market creates orders. Orders hold authority. OrderHandlers define behavior. Fills execute that behavior.**
+**Market creates orders and right accounts. Orders execute on fill. Rights hold authority until their ERC721 holder exercises or terminates them.**
 
 | Part | What it is |
 | --- | --- |
-| [`Market`](src/Market.sol) | Factory. `create(handler, config, salt)` deploys an order as a 149-byte ERC-1167 clone, records `createdAt[order]` and emits `Created(order, owner, handler, salt, config)`. Holds nothing, takes no fee and calls nothing afterwards. |
+| [`Market`](src/Market.sol) | Factory for isolated order and right accounts. Records order creation time. Holds no user assets and takes no fee. |
 | [`Order`](src/Order.sol) | One account per order, with its own ETH, tokens, approvals and roles. Its terms (owner, handler, handler code hash, config hash) are written into its code and address, so they never change. |
 | OrderHandler | Any contract implementing [`IOrderHandler.onFill`](src/Order.sol). Decides what the order does in a fill and what the filler must give. One handler serves many orders, each with its own config. |
 | Fill | `order.fill(config, input)`, by anyone. The order calls its handler, which makes the order act through `Order.execute`. Any revert undoes everything. |
+| [`Right`](src/Right.sol) | An isolated backing account with fixed issuer, handler, config, deadline and residual beneficiary. It starts pending; activation verifies backing and mints the token. |
+| [`Rights`](src/Rights.sol) | The canonical ERC721. `ownerOf(tokenId)` is the sole source of current exercise and transfer entitlement. The token ID identifies its backing account. |
+| Exercise handler | Implements backing validation and one committed operation. It acts through the right account only during the holder's authorized exercise. |
 
 Who may make an order act:
 
@@ -52,6 +55,25 @@ order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(ord
 ```
 
 `Market.orderAddress(owner, handler, keccak256(config), salt)` gives the address before creation, so assets can be sent first.
+
+## Issue, trade and exercise a right
+
+1. The issuer calls `Market.createRight(handler, config, deadline, residual, salt)`. The new account is **pending** and has no token. The issuer deposits the NFT or arranges a target-enforced reservation from outside that account.
+2. The issuer calls `Right.activate(config)`. The bound handler verifies backing and fixes any activation terms, including the covered NFT's royalty recipient and amount. `Rights` mints token `uint256(uint160(address(account)))` to the issuer. The account cannot execute arbitrary setup calls.
+3. The holder may transfer the token directly or escrow it in a normal `NFTSale` order. Filling that sale transfers the right only. The buyer may hold it, list it again, or exercise it. Closing the listing returns the token to its listing owner and leaves the right unchanged. An escrowed token belongs to the order, so its former holder cannot exercise it.
+4. Before the right's deadline, the current token owner calls `Right.exercise(config, input)`, supplying the supported handler's exact exercise payment. The account calls the handler, checks and performs the operation, reserves proceeds as isolated credits, consumes the claim and burns the token. A failed call rolls all of this back. The holder can instead surrender. At the deadline, anyone can finalize expiry; exercise, transfer and supported sale or bid quotes already fail then.
+5. The fixed residual beneficiary may recover unencumbered assets after a terminal state. Payment beneficiaries retain their credits and may call `withdrawCredit(recipient)` to choose an accepting payout destination. Neither issuer nor holder can withdraw backing while the right is live; after termination recovery belongs only to the committed residual beneficiary.
+
+The right's **deadline is exclusive**: `block.timestamp >= deadline` ends exercise and transfer, without waiting for finalization. Deadline `0` is a perpetual commitment with no issuer cancellation path after activation. Keep an order's trading deadline earlier than the right's deadline to leave a useful exercise window. A generic NFT buyer must inspect the right's terms and remaining time; ordinary NFT trading cannot guarantee this window for them.
+
+| Action | Asset/payment effect | Who controls it |
+| --- | --- | --- |
+| Fill an ordinary execution order | Executes immediately under its handler | Any filler meeting its terms; listing owner may cancel first |
+| Buy or resell a right token | Transfers only the entitlement; backing stays at the same right account | Actual ERC721 holder and approved transfer operator |
+| Exercise a right | Executes once, consumes token, credits committed proceeds | Current token owner only |
+| Cancel a right-token listing | Ends only the sale order; returns its escrowed token | Listing owner |
+
+The covered NFT purchase right fixes its ETH exercise price and activation royalty, and verifies NFT delivery. Its issuer may earn a primary listing premium; each resale premium belongs to that listing's seller. The underlying NFT's ERC2981 royalty is credited once on exercise, **not** on every right-token resale. The ordinary trading fee applies to premium sales; exercise has no trading fee or dependency on mutable `FeeConfig`. The reserved artwork right promises one authorized modification, not permanent control over the artwork or its color. The older `PaintAction` example remains an immediate order backed by a revocable painter permission, not a durable right. See [the design and trust boundaries](docs/RIGHTS_DESIGN.md) and [the local demonstrations](docs/DEPLOYMENT.md#local-right-lifecycles).
 
 ## Write a handler
 
@@ -98,6 +120,8 @@ These are different and should not be confused:
 | [`FeeConfig`](handlers/FeeConfig.sol) | Shared fee terms | The recipient and rate both NFT handlers read on each fill. A separate admin sets the rate (at most 1%, locked per order at creation) and the changeable recipient. Market never calls it. |
 | [`FillVerifier`](periphery/FillVerifier.sol) | Optional periphery | Lets a batching wallet revert its own fill unless it received what it expected. Market never calls it. |
 | [`PaintAction`](examples/PaintAction.sol) + [`Artwork`](examples/Artwork.sol) | Example | A non-trading handler: sells one repaint of an artwork using a painter role the artwork contract grants the order, then resigns the role and closes. |
+| [`CoveredNFTPurchase`](handlers/CoveredNFTPurchase.sol) | Supported exercise handler | Fully backed right to buy a specific NFT for fixed ETH; royalty recipient and amount commit at activation and proceeds become pull credits. |
+| [`ReservedPaint`](examples/ReservedPaint.sol) + `Artwork` | Example exercise handler and target | One reserved artwork modification that survives artwork transfer until exercise, surrender or expiry. |
 
 NFT trading semantics, lifecycle, compatibility with real collections and gas: [docs/NFT_TRADING.md](docs/NFT_TRADING.md). Composition: [test/Compose.t.sol](test/Compose.t.sol) settles a falling `NFTSale` against a rising `NFTBid` written by strangers, through an independent matcher, in one transaction.
 
@@ -134,17 +158,17 @@ forge test --no-match-path "test/fork/*"
 forge test --match-path "test/fork/*" --isolate
 ```
 
-Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tenderly.co`, and pin block 26,357,000. `script/Deploy.s.sol` deploys the supported contracts through the standard CREATE2 deployer; without `--broadcast` it only simulates. Addresses, Sepolia commands and the release checklist: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Fork tests read `MAINNET_RPC_URL`, defaulting to `https://mainnet.gateway.tenderly.co`, and pin block 26,357,000. `script/Deploy.s.sol` deploys the supported contracts through the standard CREATE2 deployer; without `--broadcast` it only simulates. The local right demonstrations, historical Sepolia addresses and release boundaries are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Repository
 
 ```
-src/        Market.sol, Order.sol (with IOrderHandler): the core
-handlers/   NFTSale, NFTBid, their bases NFTTrade, HandlerBase, and the shared FeeConfig
+src/        Market, Order, Right, Rights and handler interfaces: the core
+handlers/   NFTSale, NFTBid, CoveredNFTPurchase, trading bases and FeeConfig
 periphery/  FillVerifier.sol (optional)
-examples/   PaintAction + Artwork
+examples/   PaintAction, ReservedPaint and Artwork
 test/       unit, fuzz, invariant, composition, review PoCs and gas; test/fork: mainnet fork
-script/     Deploy.s.sol, Lifecycle.s.sol, rehearse.sh
+script/     Deploy.s.sol, Lifecycle.s.sol, RightsLifecycle.s.sol, rehearse.sh
 docs/       HANDLERS, SPEC, NFT_TRADING, DEPLOYMENT, SECURITY, DECISIONS, STATUS
 ```
 

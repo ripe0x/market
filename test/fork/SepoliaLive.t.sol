@@ -16,6 +16,22 @@ import {Arena, Adversary, ArenaNFT} from "../../script/Arena.s.sol";
 import {Reenterer, RoyaltyNFT} from "../utils/Mocks.sol";
 import {WalletBatch} from "../Eip7702Filler.t.sol";
 
+/// Run the historical arena against the historical Sepolia addresses even though the current
+/// deployment script now computes different addresses for the right-enabled candidate.
+contract LegacyArena is Arena {
+    function market() internal pure override returns (Market) {
+        return Market(0x7c91e34703ae3E32812bad1f7251CD0976A31FD4);
+    }
+
+    function nftSale() internal pure override returns (NFTSale) {
+        return NFTSale(0xfEf3a72600a453F82650343525751811120da2c8);
+    }
+
+    function nftBid() internal pure override returns (NFTBid) {
+        return NFTBid(0x8dbB30441bB0ca607bC17A3ea763C8f66B30017E);
+    }
+}
+
 /// The release as deployed on Sepolia, on a fork pinned at `BLOCK`: every call goes to the
 /// live contracts. Covers the arena exercise (`script/Arena.s.sol`) end to end with time
 /// advanced past the price crossing, and attacks that need cheatcodes (impersonation,
@@ -46,12 +62,15 @@ contract SepoliaLiveTest is Test {
 
     receive() external payable {}
 
-    /// The handlers on chain are exactly this repository's code built against the live Market.
-    function test_liveBytecodeMatchesBuild() public {
-        assertEq(address(SALE).codehash, address(new NFTSale(FEES)).codehash, "NFTSale");
-        assertEq(address(BID).codehash, address(new NFTBid(FEES)).codehash, "NFTBid");
+    /// Historical Sepolia deployments predate native rights. Their order paths remain testable
+    /// on this fork, but their bytecode must not be presented as the redesigned build.
+    function test_legacyBytecodeIsDistinctFromRightEnabledBuild() public {
+        Market candidate = new Market();
+        FeeConfig candidateFees = new FeeConfig(candidate, FEE_ADMIN, FEE_TO);
+        assertNotEq(address(MARKET).codehash, address(candidate).codehash, "Market is legacy");
+        assertNotEq(address(SALE).codehash, address(new NFTSale(candidateFees)).codehash, "NFTSale is legacy");
+        assertNotEq(address(BID).codehash, address(new NFTBid(candidateFees)).codehash, "NFTBid is legacy");
         assertEq(address(VERIFIER).codehash, address(new FillVerifier()).codehash, "FillVerifier");
-        assertEq(address(PAINT).codehash, address(new PaintAction()).codehash, "PaintAction");
         assertEq(MARKET.implementation(), 0x1c8Af1349Fa2b41903291675DCf5e9dfc2A8fB83);
     }
 
@@ -104,7 +123,7 @@ contract SepoliaLiveTest is Test {
 
     /// The whole arena, as `script/Arena.s.sol` will run it on Sepolia, from this contract.
     function test_arena() public {
-        Arena arena = new Arena();
+        Arena arena = new LegacyArena();
         vm.deal(address(this), 1 ether);
         uint256 before = address(this).balance;
         // `vm.getBlockTimestamp` returns a value; `block.timestamp` would be re-read after `vm.warp` under via-IR.
@@ -171,7 +190,9 @@ contract SepoliaLiveTest is Test {
 
         bytes memory mine = abi.encodeCall(IERC721.ownerOf, (1));
         WalletBatch.Call[] memory calls = new WalletBatch.Call[](2);
-        calls[0] = WalletBatch.Call(address(sale), 0.1 ether, abi.encodeCall(Order.fill, (config, abi.encode(eoa, 0.1 ether))));
+        calls[0] = WalletBatch.Call(
+            address(sale), 0.1 ether, abi.encodeCall(Order.fill, (config, abi.encode(eoa, 0.1 ether)))
+        );
         calls[1] = WalletBatch.Call(
             address(VERIFIER), 0, abi.encodeCall(FillVerifier.requireEqual, (address(nft), mine, abi.encode(eoa)))
         );

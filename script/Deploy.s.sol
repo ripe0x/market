@@ -8,6 +8,8 @@ import {FeeConfig} from "../handlers/FeeConfig.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {NFTSale} from "../handlers/NFTSale.sol";
 import {PaintAction} from "../examples/PaintAction.sol";
+import {ReservedPaint} from "../examples/ReservedPaint.sol";
+import {CoveredNFTPurchase} from "../handlers/CoveredNFTPurchase.sol";
 
 /// @notice CREATE2 addresses of the deployable contracts. They depend only on the bytecode, the
 /// salt and the standard CREATE2 deployer (0x4e59b44847b379578588920cA78FbF26c0B4956C), so they
@@ -24,19 +26,19 @@ abstract contract Addresses is Script {
         return vm.computeCreate2Address(SALT, keccak256(initCode));
     }
 
-    function market() internal pure returns (Market) {
+    function market() internal view virtual returns (Market) {
         return Market(_at(type(Market).creationCode));
     }
 
-    function feeConfig() internal pure returns (FeeConfig) {
+    function feeConfig() internal view returns (FeeConfig) {
         return FeeConfig(_at(abi.encodePacked(type(FeeConfig).creationCode, abi.encode(market(), FEE_ADMIN, FEE_TO))));
     }
 
-    function nftSale() internal pure returns (NFTSale) {
+    function nftSale() internal view virtual returns (NFTSale) {
         return NFTSale(_at(abi.encodePacked(type(NFTSale).creationCode, abi.encode(feeConfig()))));
     }
 
-    function nftBid() internal pure returns (NFTBid) {
+    function nftBid() internal view virtual returns (NFTBid) {
         return NFTBid(_at(abi.encodePacked(type(NFTBid).creationCode, abi.encode(feeConfig()))));
     }
 
@@ -47,15 +49,23 @@ abstract contract Addresses is Script {
     function paintAction() internal pure returns (PaintAction) {
         return PaintAction(_at(type(PaintAction).creationCode));
     }
+
+    function coveredNFTPurchase() internal view returns (CoveredNFTPurchase) {
+        return CoveredNFTPurchase(_at(abi.encodePacked(type(CoveredNFTPurchase).creationCode, abi.encode(market()))));
+    }
+
+    function reservedPaint() internal view returns (ReservedPaint) {
+        return ReservedPaint(_at(abi.encodePacked(type(ReservedPaint).creationCode, abi.encode(market()))));
+    }
 }
 
-/// @notice Deploys the supported release: Market (which deploys the one Order implementation),
-/// FeeConfig, NFTSale, NFTBid and the optional FillVerifier. Only FeeConfig has an admin
+/// @notice Deploys Market (which creates Rights, Right and Order implementations),
+/// FeeConfig, NFTSale, NFTBid, CoveredNFTPurchase and optional FillVerifier. Only FeeConfig has an admin
 /// (`FEE_ADMIN`), limited to the NFT handlers' fee rate (at most 1%) and recipient. A contract already at its address is skipped, so a partial run resumes and
 /// a repeat run sends nothing.
 ///
 ///   forge script script/Deploy.s.sol --rpc-url <rpc>                      # simulate
-///   forge script script/Deploy.s.sol --sig "examples()" --rpc-url <rpc>   # PaintAction example
+///   forge script script/Deploy.s.sol --sig "examples()" --rpc-url <rpc>   # PaintAction and ReservedPaint examples
 ///
 /// Broadcasting adds `--broadcast --verify` and a signer; see docs/DEPLOYMENT.md. Mainnet needs
 /// the owner's explicit approval.
@@ -66,23 +76,29 @@ contract Deploy is Addresses {
         if (_absent(address(feeConfig()))) new FeeConfig{salt: SALT}(market(), FEE_ADMIN, FEE_TO);
         if (_absent(address(nftSale()))) new NFTSale{salt: SALT}(feeConfig());
         if (_absent(address(nftBid()))) new NFTBid{salt: SALT}(feeConfig());
+        if (_absent(address(coveredNFTPurchase()))) new CoveredNFTPurchase{salt: SALT}(market());
         if (_absent(address(fillVerifier()))) new FillVerifier{salt: SALT}();
         vm.stopBroadcast();
 
         _log("Market", address(market()));
         _log("Order implementation", market().implementation());
+        _log("Right implementation", market().rightImplementation());
+        _log("Rights ERC721", address(market().rights()));
         _log("FeeConfig", address(feeConfig()));
         _log("NFTSale", address(nftSale()));
         _log("NFTBid", address(nftBid()));
+        _log("CoveredNFTPurchase", address(coveredNFTPurchase()));
         _log("FillVerifier", address(fillVerifier()));
     }
 
-    /// @notice The non-trading example handler. Not part of the supported release.
+    /// @notice Non-trading examples. Not part of the supported NFT trading release.
     function examples() external {
         vm.startBroadcast();
         if (_absent(address(paintAction()))) new PaintAction{salt: SALT}();
+        if (_absent(address(reservedPaint()))) new ReservedPaint{salt: SALT}(market());
         vm.stopBroadcast();
         _log("PaintAction (example)", address(paintAction()));
+        _log("ReservedPaint (example)", address(reservedPaint()));
     }
 
     function _absent(address at) internal view returns (bool) {

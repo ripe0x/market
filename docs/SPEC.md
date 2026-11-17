@@ -1,6 +1,6 @@
 # Market specification
 
-This is the normative description of the core in `src/`. The README explains why it is shaped this way; [SECURITY.md](SECURITY.md) lists what is enforced and how it is tested. If this document and the code disagree, the code is what runs, and the disagreement is a bug to fix.
+This is the normative description of the core in `src/`: cancelable orders and transferable execution rights. The README explains why it is shaped this way; [SECURITY.md](SECURITY.md) lists what is enforced and how it is tested. If this document and the code disagree, the code is what runs, and the disagreement is a bug to fix. The historical order rules below remain applicable to orders; the rights rules are separate.
 
 ## Terms
 
@@ -161,6 +161,33 @@ function ethBalance(address account) external view returns (uint256);
 ```
 
 `snapshot` staticcalls `target` with `query`, requires exactly 32 bytes back, and stores the value in transient storage under `keccak256(abi.encode(msg.sender, target, query))`. `requireIncrease` reverts `NoSnapshot` unless the caller took that snapshot earlier in the same transaction and has not used it yet, and `TooLittle` unless the value is now at least `minimum` higher. It uses the snapshot up, so each check needs its own snapshot. `requireEqual` reverts `Mismatch` unless the staticcall returns exactly `expected`. A failed or malformed query reverts `QueryFailed`. The contract holds nothing, has no owner and makes no state-changing calls.
+
+## Rights: a separate protocol object
+
+`Market.createRight(handler, config, deadline, residual, salt)` deploys an isolated `Right` clone and marks it as Market-created. Its immutable arguments bind the issuer (`msg.sender`), handler address and code hash, config hash, deadline and residual beneficiary. `Market.rightAddress(...)` predicts the account address with those same values. Any ETH sent with creation goes to that account. The full config appears in `RightCreated`. There is no mutable holder field or setup initializer.
+
+`Rights` is the single canonical ERC721 created by Market. A right's token ID is the backing account's address cast to `uint256`; `Rights.accountOf(id)` authenticates Market creation. The account alone mints after validated activation and burns on termination. Mint happens once. `ownerOf(id)` is the sole exercise authority, and standard ERC721 approvals can transfer the token but do not authorize `Right.exercise`. A transfer to the token's own backing account is rejected. Other custody cycles involving contracts that own each other's tokens are unsupported.
+
+| State | How reached | What may follow | Account execution |
+| --- | --- | --- | --- |
+| Pending | Creation | Issuer activates after handler validation, or permanently cancels setup | None; assets enter from outside |
+| Active | Activation stores effective terms, mints token to issuer | Holder exercises or surrenders; anyone finalizes at deadline | Bound handler, only inside this account's exercise |
+| Exercised | Handler succeeds; token burns | Terminal recovery and beneficiary credit withdrawal | Residual beneficiary may recover free assets |
+| Expired | Anyone finalizes at or after deadline; token burns | Terminal recovery and credit withdrawal | Same |
+| Surrendered | Holder surrenders; token burns | Terminal recovery and credit withdrawal | Same |
+| Canceled | Issuer cancels pending setup | Terminal recovery | Same |
+
+`activate(config)` is issuer-only. It checks the immutable config hash, handler code hash and deadline, asks the handler's read-only `validate(account, config)` to check its specific backing, stores the returned activation terms, then mints. There is no generic pending account execution, so setup cannot plant an account-originated approval that survives activation. A canceled account cannot activate. A permissionless handler may still validate poorly, depend on mutable contracts or act maliciously; core validation is not a certification of arbitrary handlers.
+
+`exercise(config, input)` is payable and current-token-owner-only. The core checks active state, `block.timestamp < deadline` (unless deadline is zero), config, bound handler code and local execution lock. It snapshots the authenticated holder, then calls `onExercise(holder, value, config, activationTerms, input)`. Only that handler may call the account's `execute` or `credit` during this window. On success the account marks itself Exercised and burns the token. Any revert rolls back the operation, payment accounting and burn. The local lock blocks same-account reentrant exercise, token transfer, surrender, expiry finalization, recovery and credit withdrawal while leaving distinct accounts composable. Handler input is untrusted; each handler constructs its own target calls and verifies the delivered state.
+
+The same deadline boundary applies to transfer, supported trading quotes, exercise and expiry finalization: at `block.timestamp >= deadline`, no live sale or exercise can settle, even before anyone finalizes. Deadline zero means perpetual commitment with no issuer escape. Surrender is a holder action; issuer status alone gives no shortcut. An issuer who buys back the token may surrender as its current holder.
+
+`credit(beneficiary, amount)` reserves account ETH for a beneficiary during exercise. The sum of outstanding credits is `totalCredits`. Neither handler execution nor terminal recovery may send ETH that would dip into this reserve. A beneficiary calls `withdrawCredit(recipient)` to send its balance to a chosen accepting destination; this works independently of lifecycle, including after residual recovery. A rejecting beneficiary cannot veto exercise because exercise records a credit instead of calling it. The residual beneficiary's `recover(target, value, data)` works after every terminal state without calling the handler and can recover NFT collateral, unused funds and accidental deposits, subject to the ETH reserve. The core cannot automatically revoke outside permissions; supported integrations consume or disable their grants.
+
+The reference covered NFT purchase handler checks `ownerOf(tokenId) == rightAccount` before activation; its activation terms fix the ERC2981 recipient and amount subject to the issuer's limit. Exercise requires exact fixed ETH payment, transfers the NFT from the account to an allowed recipient, checks `ownerOf` afterwards, then credits royalty and remaining proceeds. It never reads mutable royalty settings or trading `FeeConfig` during exercise. The reference artwork target enforces a durable reservation through its own permission rules, including after artwork transfer. The right permits one allowed modification; it does not promise the artwork's final color will persist.
+
+`NFTSale` may escrow and resell a live right token without moving its backing. Its seller owns only that listing; `Order.close` cancels the listing and permits token recovery, leaving the right untouched. A live listing's order is the token's actual holder. `NFTBid` accepts only a specific token ID for the canonical rights collection; collection-wide bids are rejected. Normal NFT sale fee and royalty rules still govern the premium, but the rights collection advertises no ERC2981 royalty. The underlying NFT's committed royalty applies once to its exercise payment, not every premium resale. Trading order deadlines are separate from the immutable right deadline and should leave an exercise window.
 
 ## Toolchain
 
