@@ -66,6 +66,8 @@ order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(ord
 
 The covered NFT purchase handler activates only when the right's immutable residual beneficiary equals its immutable issuer. A buyer who surrenders or lets the right expire gets no claim on the NFT; the issuer may recover it after termination. If the issuer still holds or buys back the token, it may surrender and recover its own NFT without an exercise payment or royalty. The general core retains configurable residual beneficiaries for other handlers. A royalty beneficiary contract must be able to call `withdrawCredit`; refusing ETH alone is fine, but a contract with no outbound-call path leaves its credit reserved and uncollected.
 
+Check the pending account's residual address **before depositing**. A covered NFT account configured with a non-issuer residual cannot activate, but after canceled or expired setup that named residual can recover its deposits. No transferable token is minted for the rejected setup.
+
 The right's **deadline is exclusive**: `block.timestamp >= deadline` ends exercise and transfer, without waiting for finalization. Deadline `0` is a perpetual commitment with no issuer cancellation path after activation. Keep an order's trading deadline earlier than the right's deadline to leave a useful exercise window. A generic NFT buyer must inspect the right's terms and remaining time; ordinary NFT trading cannot guarantee this window for them.
 
 | Action | Asset/payment effect | Who controls it |

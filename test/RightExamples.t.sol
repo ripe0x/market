@@ -85,6 +85,13 @@ contract RightExamplesTest is Test {
         uint256 id = right.tokenId();
         vm.expectRevert();
         rights.ownerOf(id);
+        vm.warp(DEADLINE);
+        vm.prank(reseller);
+        right.finalizeExpiry();
+        vm.prank(buyer);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 9)));
+        assertEq(nft.ownerOf(9), buyer, "pending residual remains committed despite failed activation");
+        assertEq(right.totalCredits(), 0);
     }
 
     function _covered(uint256 tokenId) internal returns (RoyaltyNFT nft, Right right, bytes memory config) {

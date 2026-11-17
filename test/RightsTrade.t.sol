@@ -189,6 +189,26 @@ contract RightsTradeTest is Base {
         assertEq(right.totalCredits(), 0, "no exercise payment or royalty on issuer release");
     }
 
+    function test_paidBuyerSurrenderLosesPremiumAndIssuerRecovers() public {
+        (Order listing, bytes memory saleConfig) = _listing(seller, PREMIUM);
+        vm.prank(buyer);
+        listing.fill{value: PREMIUM}(saleConfig, abi.encode(buyer, PREMIUM));
+        uint256 id = right.tokenId();
+        assertEq(rights.ownerOf(id), buyer);
+        vm.prank(buyer);
+        right.surrender();
+        vm.prank(buyer);
+        vm.expectRevert(Right.Unauthorized.selector);
+        right.recover(address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(right), buyer, 1)));
+        vm.prank(seller);
+        right.recover(address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(right), seller, 1)));
+        assertEq(art.ownerOf(1), seller);
+        assertEq(buyer.balance, 100 ether - PREMIUM, "premium is sunk after surrender");
+        assertEq(seller.balance, 0.198 ether);
+        assertEq(treasury.balance, 0.002 ether);
+        assertEq(right.totalCredits(), 0, "no exercise payment or royalty");
+    }
+
     function test_expiredEscrowCannotSettleBeforeFinalization() public {
         (Order listing, bytes memory saleConfig) = _listing(seller, PREMIUM);
         vm.warp(rightDeadline);
