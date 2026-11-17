@@ -321,6 +321,9 @@ contract RightsTradeTest is Base {
         vm.prank(seller);
         vm.expectRevert(Right.EncumberedBalance.selector);
         account.recover(seller, PRICE, "");
+        account.releaseCredit(royalty);
+        assertEq(royalty.balance, PRICE);
+        assertEq(account.totalCredits(), 0);
     }
 
     function test_royaltyRecipientCannotReenterToStealOtherCredit() public {

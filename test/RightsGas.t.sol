@@ -57,6 +57,11 @@ contract RightsGasTest is Base {
         vm.prank(attacker);
         right.exercise{value: 1 ether}(config, abi.encode(attacker));
         vm.snapshotGasLastCall("right: exercise covered NFT");
+        right.releaseCredit(royalty);
+        vm.snapshotGasLastCall("right: release royalty credit");
+        assertEq(royalty.balance, 0.05 ether);
+        assertEq(right.creditOf(royalty), 0);
+        assertEq(right.totalCredits(), 0.95 ether);
     }
 
     function test_gasExpiryRecovery() public {
