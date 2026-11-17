@@ -1,8 +1,75 @@
 # Status
 
-Updated 2026-11-16. Owner decisions 1, 3, 4, 7 and 8 recorded in DECISIONS.md. `main` after PR #3 (NFT trading, merged as `33659c5`) and PR #4 (deployment and developer docs).
+Updated 2026-11-17. Transferable-rights candidate on `codex/transferable-rights`, based on `79120eb`. The candidate is published as PR #16 and remains unmerged; no redesigned contract has been broadcast. Earlier Sepolia records below remain historical evidence for the order-only release.
 
-## State
+## Transferable-rights candidate
+
+The redesign adds isolated `Right` accounts, canonical `Rights` ERC721 ownership, activation validation, fixed exercise terms, terminal recovery and per-account ETH payment credits. `CoveredNFTPurchase` and `ReservedPaint` are the two reference handlers. Existing orders, immediate PaintAction, and the direct NFT trading policy remain. **Experimental and unaudited.** No production compatibility claim is made for the new addresses.
+
+| Check | Exact command and result | Limit |
+| --- | --- | --- |
+| Formatting and compilation | `forge fmt --check` on changed Solidity files and `forge build --sizes --skip test --skip script`: exit 0. Runtime bytes: Market 2,325, Order 2,133, Right 6,118, Rights 4,673, CoveredNFTPurchase 3,610, NFTSale 3,778, NFTBid 4,056, ReservedPaint 2,318, Artwork 5,155. | All below the 24,576-byte runtime limit; Market initcode 16,693 bytes. |
+| Local suite | `CANDIDATE_RUN=1 forge test --no-match-path 'test/fork/*' --summary`: exit 0, 218 passed, 0 failed across 25 suites, including passive payout, hostile payout callbacks, atomic issuance and the deterministic multi-account driver scenario. The rights driver then gained an additional atomic-issuance action and more metric labels; its affected campaign is recorded below. | Fork suites ran separately through public Tenderly RPC. |
+| Mainnet fork | `MAINNET_RPC_URL=https://mainnet.gateway.tenderly.co SEPOLIA_RPC_URL=https://sepolia.gateway.tenderly.co forge test --match-path 'test/fork/*' --isolate --summary`: exit 0, 16 mainnet tests including 2 new covered-right tests for BAYC and Opepen at block 26,357,000. | Pinned historical collections; fork actors are impersonated. |
+| Historical Sepolia fork | Same combined fork command: 7 passed at block 12,150,234, including the legacy arena and the explicit old/new bytecode distinction. | These deployed contracts have no native rights. |
+| Previous rights invariant evidence (3e868bc) | The original 1,000 × 128 campaign made 128,000 driver calls, but created only one right per run. Most later calls could skip after that right terminated. | Call count did not measure meaningful transitions; the replacement multi-account campaign below supersedes this coverage claim. |
+| Local demonstrations | `forge script script/RightsLifecycle.s.sol:RightsLifecycle --sig 'run()'`: exit 0; covered right sold, resold, exercised, and separately expired and recovered; artwork right sold, resold and exercised after artwork transfer. | Script uses local cheatcodes, not real signed transactions. |
+| Deployment simulations | Local `forge script script/Deploy.s.sol:Deploy --sig 'run()'`: exit 0, 7,817,821 simulated gas; `examples()`: exit 0, 1,007,584 simulated gas. Read-only `forge script script/Deploy.s.sol:Deploy --sig 'run()' --rpc-url https://mainnet.gateway.tenderly.co`: exit 0, 10,236,025 estimated gas on a mainnet simulation. | No signer or broadcast. Addresses and estimates reflect the permissionless credit-release build; they are not a real-transaction rehearsal. |
+| Static analysis | `slither . --skip-clean --exclude-dependencies --filter-paths 'lib/|test/|script/' --json /tmp/market_credit_slither.json`: Slither 0.11.5, 101 detectors over 29 contracts, 24 reported results. Exit 255 for findings; JSON reports success. Same detector categories, triaged below. | Detector output is not an audit. |
+| Rights gas | `forge test --match-path 'test/*Gas.t.sol' --isolate --summary`: 8 tests passed; `snapshots/RightsGasTest.json` and `snapshots/GasTest.json`. | Local Prague / solc 0.8.30 / via-IR / 200 optimizer runs; gas price and basefee are not modeled. |
+
+### Rights invariant model after PR review
+
+The replacement driver keeps up to 32 separate account records, never reusing terminal records. Separate create/deposit/activate actions exercise pending setup; an atomic issue action also supplies fresh active claims throughout the run. A bounded eligible-state scan interleaves transfers, sale escrow/fill/cancel, exercise, surrender, finite expiry, accidental ETH deposits, recovery, payout and issuer bypass attempts. Every record remains subject to NFT custody/delivery, actual live token ownership, pending/terminal token absence, ETH solvency and per-beneficiary credit reconciliation. Sale premiums are independently checked at 0.2 ETH = 0.198 ETH seller + 0.002 ETH fee; exercise at 1 ETH = 0.95 ETH proceeds + 0.05 ETH royalty.
+
+Successful action counters and skipped calls are separate. Forge exposes `afterInvariant` logs for the final run only; they are not campaign aggregates. Creation/activation counters include constructor setup (two created, one backed active and one backed pending). The combined finalization counter includes both pending and active states; the deterministic scenario independently reaches active expiry. Saturation at 32 accounts is counted as a skip. This harness does not exercise an escrow order's token directly; the token is sold or returned before exercise, or expires in escrow.
+
+The accepted rights campaign ran `FOUNDRY_INVARIANT_RUNS=1000 FOUNDRY_INVARIANT_DEPTH=128 FOUNDRY_INVARIANT_FAIL_ON_REVERT=true forge test --match-path test/RightsInvariant.t.sol --fuzz-seed 0x17 -vv`: exit 0, 1,000 runs, 128,000 driver calls, zero driver reverts, plus the deterministic driver test. The unchanged order campaign also passed 1,000 × 128 calls with zero driver reverts at seed `0x17` in the earlier combined `test/*Invariant.t.sol` run.
+
+Final rights run only (128 calls, including 50 skipped calls; constructor setup counts are included below):
+
+| Successful operation | Count | Successful operation | Count |
+| --- | ---: | --- | ---: |
+| Created / collateral deposited / activated | 19 / 10 / 8 | Direct transfers / listings / sales | 5 / 3 / 2 |
+| Exercise / surrender | 5 / 1 | Pending-or-active finalizations / pending cancels | 3 / 9 |
+| NFT / free ETH recoveries | 4 / 3 | Credit payouts / bypass attempts | 8 / 10 |
+| ETH deposits | 7 | Listing cancellations / stale closes | 0 / 1 |
+
+This final sample did not reach live listing cancellation, and its combined finalizations do not establish a separate active-expiry count. The deterministic driver test reaches both paths and asserts no skipped actions. The 32-account cap was not reached in this sample; all 50 skips lacked a suitable state. No aggregate transition count across the 1,000 runs is claimed.
+
+The model uses one honest local NFT, fixed prices/royalties/fees, funded external actors and zero gas price. Counters describe reached contract paths, not production demand, user profit, arbitrary targets, or adversarial recipient coverage. Dedicated payout and composition tests cover hostile callbacks. An initial broad build also saw a partially written driver and failed compilation; that transient failure is not a candidate result. The first complete replacement run had 282 unintended driver reverts because `vm.prank` was consumed by a `tokenId()` argument evaluation; IDs were moved before impersonation and zero-revert checks then passed. The first deep replacement sample still reached few activations, so a fresh-backed-issue action was added before accepting the strengthened campaign.
+
+### Economic flow scorecard
+
+These are acceptance examples from executed local paths, not owner-approved launch limits. Each right has its own custody and credit balance. The direct NFT sale policy remains the historical O1–O5; right-token premiums use that trading layer, while exercise does not.
+
+| Regime | Input and destination | State after the round trip |
+| --- | --- | --- |
+| Primary sale and resale | One NFT stays in its backing account through 0.2 ETH and 0.3 ETH right-token premiums. At 1% trading fee, sellers receive 0.198 and 0.297 ETH; fee recipient receives 0.002 and 0.003 ETH. | Final holder pays 1 ETH to exercise. With royalty fixed at activation at 5%, the account credits 0.05 ETH to royalty recipient and 0.95 ETH to issuer's proceeds beneficiary, delivers the NFT and burns the token. Withdrawal takes both credits to zero; residual gets no part of the exercise payment. |
+| No buyer, then expiry | One NFT, zero premiums and zero exercise payment. Listing cancellation returns only the token; at the right deadline anyone burns it by finalizing. | The immutable issuer, required as residual for the covered NFT handler, recovers the one NFT. No exercise credit or trading fee arises. An abandoned finite Pending setup can also be finalized by anyone at its deadline and recovered by its configured residual beneficiary. |
+| Maximum configured royalty | One NFT, 1 ETH exercise payment, ERC2981 at the issuer's 100% limit. | Royalty credit 1 ETH, issuer proceeds credit 0; residual cannot recover the reserved ETH. |
+| Passive accepting beneficiary | One NFT, 1 ETH exercise payment, accepting royalty receiver has no outbound call function. | Third-party release pays 0.05 ETH to the recorded royalty receiver, 0 ETH to caller; 0.95 ETH stays reserved for proceeds. No recipient call occurs during exercise. |
+| Refusing royalty beneficiary | One NFT, 1 ETH exercise payment, royalty receiver rejects ETH. | Exercise succeeds with 0.05 ETH royalty and 0.95 ETH proceeds credits. If that contract has no callable withdrawal path, its 0.05 ETH stays reserved and uncollected; the residual cannot take it. |
+| Buyer surrender or expiry | One covered NFT right sold or transferred to a buyer; 1 ETH exercise price and 5% committed royalty. A paid surrender test uses a 0.2 ETH premium and 1% trading fee. | Buyer loses the token and gets 0 NFT; issuer recovers 1 NFT. The paid buyer's 0.2 ETH premium is sunk: seller received 0.198 ETH and fee recipient 0.002 ETH. Exercise payment and royalty are both 0 because no exercise occurred. Activation rejects a buyer named as residual. |
+| Invalid Pending setup | Issuer creates and deposits one NFT in a Pending account configured with buyer as residual. | Activation rejects. No token or buyer claim is minted. At the deadline anyone finalizes; the configured buyer residual can recover the one NFT with 0 exercise payment. This is a setup loss chosen by the issuer before any transferable entitlement exists. The reference flow checks residual and issuer before deposit; the atomic wallet example reverts the entire invalid setup. |
+| Issuer cancellation or buyback | Issuer still holds the token, or buys it back through an ordinary premium sale, then surrenders. | Issuer recovers 1 NFT with 0 exercise payment and 0 exercise royalty. A 0.2 ETH buyback premium pays 0.198 ETH to its listing seller and 0.002 ETH trading fee. |
+| Failed delivery | A hostile NFT moves then lies about delivery. | The whole transaction reverts: NFT remains backing, holder retains token and 1 ETH, credits remain zero. |
+
+At the measured local gas units, create plus activate is 359,249 gas paid by the issuer, transfer 71,282 by the holder, premium sale 190,782 by the buyer, exercise 201,511 by the holder, expiry finalization 52,200 by its caller, and NFT recovery 72,939 by the issuer. At a **hypothetical** 1 gwei gas price those costs are 0.000359249, 0.000071282, 0.000190782, 0.000201511, 0.000052200 and 0.000072939 ETH respectively; at 100 gwei they are 100 times higher. A third-party royalty release measured 71,728 gas (0.000071728 ETH at hypothetical 1 gwei, 0.0071728 ETH at 100 gwei), borne by the caller. No test modeled inclusion prices or participant margin. Setup plus activation is 35.9% of a 0.1 ETH primary premium at 100 gwei, so real trading economics require live gas and premium data before launch.
+
+Slither triage: `arbitrary-send-eth` on `Right._call` and `Order.execute` reflects the explicitly authorized handler or terminal recovery call; the right checks `balance - totalCredits`. `locked-ether` on Market reflects value forwarded to an isolated account; a perpetual right can intentionally hold funds indefinitely. `reentrancy-no-eth` on `Right.exercise` and `Order.fill` is bounded by local transient locks; the rights tests reenter transfer, surrender, recovery and exercise and check credit solvency. `reentrancy-events` concerns log order after external calls; state and payout assertions use contract state. Timestamp findings are the explicit deadline policy, tested at the exact boundary. Assembly and low-level calls are the clone argument reader, revert bubbling and authorized ETH transfers. No reported detector established an actionable bypass in the tested supported paths.
+
+Independent read-only AI review of `1283ef5` found four issues. Expired pending setup could strand backing; the core now permits anyone to finalize it at the deadline. The owner resolved the covered NFT dual-role case by requiring issuer-only residual recovery at activation, without changing the generic core. Tests cover buyer surrender, expiry, issuer cancellation and buyback. Ordinary trading handlers intentionally accept exact `Order` clones outside Market (existing test and [NFT_TRADING.md](NFT_TRADING.md)); indexers must check `Market.Created` provenance. At that revision, a passive royalty contract with no outbound function still had a solvent but uncollectible credit; D411 supersedes that payout limitation for accepting receivers. This AI review is not a full or independent human security audit.
+
+A follow-up read-only review of `32d071f` found no active covered-right bypass. It identified the invalid Pending setup destination and the missing sunk premium in the surrender scorecard; both are now tested and disclosed. The handler check remains at activation as the owner specified, and the core's configurable residual rule remains unchanged.
+
+Independent read-only review of `4da3b54` traced the two payout paths, callback reentry, residual reserves and checked issuance; no actionable bypass was found. Review of `402c5c8` verified the multi-account ledger and identified the combined pending/active finalization label, now made explicit. These reviews did not independently rerun the full campaigns.
+
+**Things that don't make sense:** A receiver that both refuses ETH and cannot authorize another destination still cannot collect; a perpetual pending setup with an absent issuer has no deadline cleanup; the no-demand expiry finalizer needs someone willing to pay gas. Issuer-only residual recovery is an address rule and does not track who controls an issuer contract. These require deployment policy or new participant-right decisions if they must be eliminated.
+
+Remaining before a real deployment: independent human security and economic review, live gas and user-margin checks, a real-transaction rehearsal of the redesigned deployment and both rights lifecycles, a current-block fork check, a canary plan and explicit owner authority for any broadcast. The existing `script/rehearse.sh` covers the historical order lifecycle only. No arbitrary handler or external NFT/target is certified by these tests.
+
+## Historical order-only state and evidence
 
 Experimental. The core was merged to `main` on 2026-11-06 (PR #2). PR #3 added the NFT trading handlers and, after a simplification review on 2026-11-10, cut the repository down to the supported release (DECISIONS D301 to D304). PR #4 adds the deployment scripts and developer documentation. **Not audited. Not deployed to mainnet.** No mainnet transaction or paid service has been used.
 
@@ -67,7 +134,7 @@ Whole-transaction gas, isolated runs, local mocks (`snapshots/GasTest.json`). Re
 
 The fill authentication added to `NFTSale` (S1) costs about 2,500 gas per sale fill on the fork. The fee (D305, D307) adds about 12,000 per fill when the recipient already exists, 25,000 more if it does not; moving the fee terms into the shared `FeeConfig` (D309) adds about 5,100 more per fill than the per-handler rate of the previous revision (an external call and its cold storage reads). Recording the creation time (D306) adds about 22,200 to each create (one cold `SSTORE`). Once the rate has been changed, each fill looks up its order's creation time and searches the rate history by binary search: the fixed sale costs 150,995 after one rate change against 143,176 before any.
 
-## Not verified
+## Historical release limitations
 
 1. No human audit. AI reviews and Slither only (SECURITY.md).
 2. Fork tests impersonate holders; real wallet software and EIP-7702 delegates other than the one Opepen holder's were not exercised.
@@ -75,8 +142,4 @@ The fill authentication added to `NFTSale` (S1) costs about 2,500 gas per sale f
 4. The full suite ran only on solc 0.8.30 for Prague; 0.8.28 for Cancun was compiled, not tested.
 5. Sepolia runs used contracts controlled by one signer and test collections; no third-party wallets, independent fillers or real collections on a public chain.
 
-## Next actions
-
-1. Economic pass against the approved outcomes O1 to O10 in [OWNER-REQUIREMENTS.md](../OWNER-REQUIREMENTS.md): flow breakdown under each regime and a one-screen scorecard.
-2. Mainnet: the checklist in [DEPLOYMENT.md](DEPLOYMENT.md#mainnet-release-checklist), then the owner's explicit approval.
-3. Independent human audit of `src/`, `handlers/` and `periphery/` before any value-bearing deployment.
+The historical list above does not establish readiness for the right-enabled candidate. Its remaining checks are listed in the current candidate section at the top of this page.

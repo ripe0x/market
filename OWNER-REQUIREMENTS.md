@@ -48,3 +48,40 @@ Approved by the owner on 2026-11-16 ("go with your recs"). P is the schedule pri
 - 2026-11-16: the owner made the fee recipient editable post-deploy and separate from the admin, moving the fee terms into a shared `FeeConfig` ("the fee recipient shouldn't be required to be the same as the admin."; "can the order contracts call the factory or something to get the fee recipient? so it can remain editable post-deploy?"), with fee recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72` and admin/deployer `0xCB43078C32423F5348Cab5885911C3B5faE217F9` (D309). This reverses the earlier "keep the fee recipient as is" (D307). `Market` stays ownerless and fee-free, so the terms live in `FeeConfig`, not `Market` (R2, rule 2). O4 and O9 are revised again by this change and await the owner's confirmation.
 - 2026-11-16: the owner approved the revised O4 and O9 for the shared `FeeConfig` (D309) ("Confirm both").
 - 2026-11-16: the owner will not use a Safe ("i'm not using safe"). The `FeeConfig` admin stays the keystore key `0xCB43078C32423F5348Cab5885911C3B5faE217F9`; its powers and the mitigation are in SECURITY.md, residual risk 23.
+
+## Transferable rights direction, 2026-11-17
+
+The owner explicitly approved a new product direction and core architecture in the 2026-11-17 brief. These requirements supersede earlier order-only design decisions where they conflict. The historical order outcomes O1–O10 above remain the approved outcomes for **ordinary orders and their NFT trading handlers**. In particular, O6's owner recovery applies to a cancelable order, not to an active right; O4's statement that Market only records order creation time is historically true of that release, not the redesigned core. The right economics below are **prospective acceptance outcomes from the new brief**, not a newly signed numeric release scorecard.
+
+| # | Owner's words | Acceptance outcome |
+| --- | --- | --- |
+| R11 | "Someone should be able to acquire the right to perform an onchain action, hold that right, sell it to somebody else, or eventually exercise it." | O11, O12 |
+| R12 | "Acquiring or transferring the right must not execute the underlying action." | O11 |
+| R13 | "While a right remains live, its original issuer cannot withdraw the backing or change the committed terms through Market. The holder can transfer the entitlement, but cannot bypass its exercise conditions to take the backing." | O12, O13 |
+| R14 | "An order is a cancelable offer to exchange something or perform an immediate transaction. A right is a transferable entitlement to execute a committed operation later." | O11, O14 |
+| R15 | "Token ownership must be the authoritative source of who currently holds the right." | O12 |
+| R16 | "For the first version, implement one successful exercise per right." | O12 |
+| R17 | "A right with a deadline must become unexercisable at that deadline even if nobody submits a finalization transaction." | O13 |
+| R18 | "A beneficiary refusing eth must not veto an otherwise valid supported exercise." | O15 |
+| R19 | "Do not automatically apply the underlying nft's royalty policy to every resale of a right token." | O16 |
+| R20 | "Do not deploy contracts, broadcast transactions, use real assets, merge into main, or push changes without explicit authorization." | Local-only delivery |
+| R21 | "Require residualBeneficiary == issuer when activating a covered nft right, using the account’s authenticated, immutable issuer"; "Keep the core’s configurable residual beneficiary." | O18, D410 |
+| R22 | "Support two distinct withdrawal paths"; "add a permissionless releaseCredit(beneficiary) while retaining the existing beneficiary-controlled withdrawCredit(recipient)". | O19, D411 |
+
+| # | Prospective outcome | Number and asset destination |
+| --- | --- | --- |
+| O11 | Issue, sell, resell and exercise or expire a backed right without moving its backing during transfers. | 1 backing account per token; 0 underlying actions on acquisition or transfer. |
+| O12 | Holder authority comes from the canonical token; issuer has no privileged active recovery; successful exercise consumes it. | 1 active token per right; at most 1 successful exercise; 0 live issuer withdrawals or holder bypasses. |
+| O13 | Time and terminal rules apply without a keeper. | At `timestamp >= deadline`, 0 exercises and 0 live transfers; anyone may finalize. `deadline = 0` is perpetual. |
+| O14 | Canceling a sale listing leaves the underlying right intact. | 1 token returned to listing owner; 0 changes to right config, activation terms or deadline. |
+| O15 | Covered NFT exercise credits payment beneficiaries without requiring callbacks and reserves the liability. | If exercise price is P and committed royalty R, credit R to royalty recipient and P − R to proceeds beneficiary; terminal recovery may take only `balance − totalCredits`. Exact payment P. |
+| O16 | Premium and exercise economics are separate. | Primary or resale premium L pays the ordinary trading fee F and no underlying NFT royalty; listing seller receives L − F. One exercise payment P carries one committed royalty R and no trading fee. Ordinary direct NFT sales retain historical O1–O5. |
+| O17 | Reserved artwork action is target enforced, including through artwork transfer. | 1 allowed modification, 0 artwork ownership transfer, 0 owner revocations or replacements of a live reservation. No permanent color guarantee. |
+| O18 | Covered NFT activation requires the immutable issuer as residual beneficiary. Buyer surrender or expiry of an activated right releases collateral to that issuer; issuer surrender while holding or after buyback remains allowed. | 0 activations with non-issuer residual; an activated right's buyer receives 0 NFT and pays 0 exercise ETH after surrender or expiry; issuer recovers 1 NFT. A successful 1 ETH exercise at 5% committed royalty credits 0.05 ETH royalty and 0.95 ETH proceeds. Surrender and expiry create 0 exercise royalty. |
+| O19 | A third party can pay an accepting recorded beneficiary; only the beneficiary can redirect. Failed payout preserves completed exercise and all remaining liability. | For a 0.05 ETH royalty credit, third-party release sends exactly 0.05 ETH to that receiver and 0 ETH to caller. A refusing receiver keeps its 0.05 ETH credit; the 0.95 ETH proceeds credit remains independently withdrawable. |
+
+No exact gas, premium, exercise price, royalty rate, deadline length or release cap is approved here; those depend on a particular right and the release candidate. The economic scorecard must supply concrete launch-scale examples and measured gas before a real deployment decision.
+
+O18 applies after activation. A rejected Pending setup has no right token; its configured residual beneficiary still controls recovery after issuer cancellation or deadline finalization. An issuer must inspect the residual address before depositing collateral into any pending account.
+
+The historical O9 gas measurements do not apply to the right-enabled bytecode. D409 and [STATUS.md](docs/STATUS.md) record the current measured costs; O1–O5 payment destinations and the 1% NFT trading fee remain unchanged.

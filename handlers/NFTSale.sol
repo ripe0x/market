@@ -75,6 +75,7 @@ contract NFTSale is NFTTrade {
         returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo)
     {
         if (c.proceedsTo == address(0)) revert ZeroAddress();
+        _requireLiveRight(c.nft, c.tokenId);
         price = _currentPrice(c.schedule);
         (feeTo, fee, royaltyTo, royalty) = _split(order, c.nft, c.tokenId, price);
         uint256 limit = price * c.maxRoyaltyBps / 10_000;

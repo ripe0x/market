@@ -42,11 +42,14 @@ contract NFTBid is NFTTrade {
     /// @notice Tokens bought by each order, written only by that order's own fills.
     mapping(address order => uint256) public fills;
 
-    event Bought(address indexed order, address indexed seller, uint256 indexed tokenId, uint256 price, uint256 royalty);
+    event Bought(
+        address indexed order, address indexed seller, uint256 indexed tokenId, uint256 price, uint256 royalty
+    );
 
     error WrongToken(uint256 tokenId);
     error InsufficientFunds(uint256 price, uint256 balance);
     error BelowMinProceeds(uint256 proceeds, uint256 minProceeds);
+    error CollectionWideRightsBid();
 
     constructor(FeeConfig fees_) NFTTrade(fees_) {}
 
@@ -82,7 +85,9 @@ contract NFTBid is NFTTrade {
         view
         returns (uint256 price, address royaltyTo, uint256 royalty, uint256 fee, address feeTo)
     {
+        if (c.anyToken && address(c.nft) == address(canonicalRights)) revert CollectionWideRightsBid();
         if (!c.anyToken && tokenId != c.tokenId) revert WrongToken(tokenId);
+        _requireLiveRight(c.nft, tokenId);
         price = _currentPrice(c.schedule);
         if (order.balance < price) revert InsufficientFunds(price, order.balance);
         (feeTo, fee, royaltyTo, royalty) = _split(order, c.nft, tokenId, price);

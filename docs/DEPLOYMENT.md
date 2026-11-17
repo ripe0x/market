@@ -4,14 +4,23 @@
 
 | Chain | Chain ID | Status |
 | --- | --- | --- |
-| Ethereum Sepolia | 11155111 | **Deployed and verified** (2026-11-16): the current release, with the shared `FeeConfig` (admin `0xCB43…17F9`, recipient `0xD4ba…7e72`, 1%), plus the unchanged `FillVerifier` and `PaintAction` example. The 2026-11-10 `Market`, `NFTSale` and `NFTBid` are superseded and kept in "Deployment record" for reference |
-| Ethereum mainnet | 1 | **Not deployed.** Simulated only. Needs the release checklist below and the owner's explicit approval |
+| Local simulation | 31337 | Transferable rights redesign implemented here; **not deployed** to any public chain |
+| Ethereum Sepolia | 11155111 | **Legacy order-only release**, deployed and verified 2026-11-16. Its `Market`, `FeeConfig`, `NFTSale`, `NFTBid` and `PaintAction` addresses below do not support native transferable rights. Historical records remain below. |
+| Ethereum mainnet | 1 | **Not deployed.** Any future deployment needs a frozen candidate, rehearsal, review and the owner's explicit approval. |
+
+## Transferable rights candidate addresses
+
+The new `Market` creates an `Order` implementation, a `Right` implementation and canonical `Rights` ERC721. The supported deployment script also creates `CoveredNFTPurchase`, updated `NFTSale` and `NFTBid`, `FeeConfig` and `FillVerifier`; its `examples()` path adds `PaintAction` and `ReservedPaint`. **No redesigned address is deployed on Sepolia or mainnet.** Run `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` without `--broadcast` to calculate candidate addresses only after the final bytecode is frozen. The result may change with any source or compiler input change; do not use the old table as an address source.
+
+`Market.rights()` and `Market.rightImplementation()` identify the canonical token and backing implementation. `Market.rightAddress(issuer, handler, configHash, deadline, residual, salt)` predicts an individual backing account; verify `Market.isRight(account)` before relying on it. `Rights.accountOf(tokenId)` authenticates a Market-created account. Each right publishes its config in `RightCreated`; its activation terms, deadline, state and residual beneficiary can be read from the account.
+
+## Historical order-only addresses (superseded for new rights)
 
 ## Addresses
 
-Every contract deploys through the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")` and has no owner. The address depends only on the bytecode (and constructor argument), so it is the same on every chain and anyone can deploy it. **Any change to a contract's Solidity source, including a comment, changes its metadata and therefore its address.** `forge script script/Deploy.s.sol` prints the current addresses without sending anything. If it prints addresses other than the tables below for unchanged code, stop: the build differs. `foundry.toml` fixes the remappings (`auto_detect_remappings = false`) because they are part of the metadata; before that fix, a checkout with OpenZeppelin's nested submodules (`git submodule update --recursive`) compiled to different bytecode and addresses (found 2026-11-10).
+The top-level contracts in the 2026-11-16 release used the standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` with salt `keccak256("market.v1")`; `Market` itself created the `Order` implementation. Their addresses depended on their bytecode and constructor arguments. **Any source change, including a comment, can change metadata and therefore an address.** The current `forge script script/Deploy.s.sol` prints new right-enabled addresses, not the historical table below. `foundry.toml` fixes remappings (`auto_detect_remappings = false`) because they affect metadata; before that fix, a checkout with OpenZeppelin's nested submodules compiled to different addresses (found 2026-11-10).
 
-Supported release (`forge script script/Deploy.s.sol`). The creation-time core change (D306) altered `Market`'s bytecode and the fee terms moved into a new `FeeConfig` (D309), so `Market`, the `Order` implementation it creates, `FeeConfig`, and the two handlers that now take `FeeConfig` all have new addresses. They are deployed on Sepolia (2026-11-16) and nowhere else. The addresses depend on the fee admin and recipient set in `script/Deploy.s.sol`; run `forge script script/Deploy.s.sol` to print them before deploying and stop if they differ. The pre-revision Sepolia addresses are kept for reference only.
+The 2026-11-16 order-only release used these addresses on Sepolia. They are **not** the current source's addresses. The creation-time core change (D306) had altered `Market`'s bytecode and the fee terms moved into `FeeConfig` (D309). The earlier addresses remain here solely for historical readback and reproduction of that deployment.
 
 | Contract | Address | Constructor |
 | --- | --- | --- |
@@ -28,11 +37,11 @@ Example, deployed separately (`forge script script/Deploy.s.sol --sig "examples(
 | --- | --- | --- |
 | `PaintAction` | `0x2e8341791F5c1c44313dd2c3e43dF6476756B237` | none |
 
-Orders are 149-byte ERC-1167 clones of the implementation. Their terms are the last 104 bytes of their code; read them with `owner()`, `handler()`, `handlerCodehash()` and `configHash()`. Their full config is in `Market.Created`.
+The historical order-only deployment's orders are 149-byte ERC-1167 clones of their implementation. Their terms are the last 104 bytes of their code; read them with `owner()`, `handler()`, `handlerCodehash()` and `configHash()`. Their full config is in `Market.Created`.
 
 ## Deployment gas
 
-Estimated by `forge script` against mainnet state (`--rpc-url https://mainnet.gateway.tenderly.co`, simulation only), 2026-11-10:
+Historical order-only estimate by `forge script` against mainnet state (`--rpc-url https://mainnet.gateway.tenderly.co`, simulation only), 2026-11-10. It does **not** estimate the redesigned contracts:
 
 | Script | Contracts | Gas |
 | --- | --- | --- |
@@ -40,18 +49,41 @@ Estimated by `forge script` against mainnet state (`--rpc-url https://mainnet.ga
 | `Deploy.s.sol` | Market, implementation, FeeConfig, NFTSale, NFTBid, FillVerifier | 3,682,037 (45% less) |
 | `Deploy.s.sol --sig "examples()"` | PaintAction | 424,083 |
 
-These figures predate this revision (D305 to D309), which enlarged `Market`, added `FeeConfig` and changed both handlers; re-estimate with `forge script` at the release candidate. On Sepolia, only `FillVerifier` can now be reused: `Market`'s address changed with D306 and the fee moved into `FeeConfig` (D309), so the script will deploy `Market`, the implementation, `FeeConfig`, `NFTSale` and `NFTBid`, and skip only `FillVerifier`.
+Re-estimate the right-enabled script at the frozen candidate. On Sepolia, the old order-only `Market`, its implementation, `FeeConfig` and trading handlers do not implement the new right architecture. `PaintAction` has a new creation-code address after its imported `Artwork` changed. Only `FillVerifier` currently retains the old CREATE2 address; verify again against frozen bytecode.
 
 ## Scripts
 
 | Script | What it does | Sends transactions |
 | --- | --- | --- |
-| [`script/Deploy.s.sol`](../script/Deploy.s.sol) | `run()`: the supported release. `examples()`: PaintAction. Skips contracts already deployed, so a partial run resumes and a repeat sends nothing | Only with `--broadcast` |
-| [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol) | From one account: a test ERC2981 collection, a fixed-price sale with royalty, a falling sale cancelled and recovered, a persistent rising bid filled twice and topped up, and the PaintAction example. `recover(address)` then cancels the bid and withdraws what it holds | Only with `--broadcast`; about 0.012 ETH plus gas |
+| [`script/Deploy.s.sol`](../script/Deploy.s.sol) | `run()`: right-enabled Market, NFT trading and covered purchase handler. `examples()`: PaintAction and ReservedPaint. Skips addresses already holding code. | Only with `--broadcast` |
+| [`script/Lifecycle.s.sol`](../script/Lifecycle.s.sol) | Historical order-only example: fixed and falling NFT sales, bid and revocable PaintAction. Its previous Sepolia results are in the record below. | Only with `--broadcast`; historical example spent about 0.012 ETH plus gas |
+| [`script/RightsLifecycle.s.sol`](../script/RightsLifecycle.s.sol) | Local-only simulation of covered NFT primary and secondary premiums, exercise credits, listing cancellation, expiry and collateral recovery; then reserved artwork resale and exercise after artwork transfer. Requires local chain ID 31337 and cannot broadcast to a public chain. | No public broadcast path |
 | [`script/Arena.s.sol`](../script/Arena.s.sol) | Multi-party trading and onchain attacks against the live release, from one signer through CREATE2 party contracts: `setup(id)`, `attack(id, start)`, `settle(id, start)`, `cleanup(id, start)` | Only with `--broadcast`; returns all ETH except gas |
 | [`script/rehearse.sh`](../script/rehearse.sh) | Runs Deploy, examples, Lifecycle and recover on a throwaway anvil fork (Sepolia by default; pass a mainnet RPC for mainnet) from anvil's unlocked account | Only to the local fork |
 
-Deploy only from an up-to-date `main` checkout, with the owner's Foundry keystore `ripe0x` (`--account ripe0x`; `cast wallet address --account ripe0x` prints its address for `--sender`). Use Tenderly's public gateways: `https://sepolia.gateway.tenderly.co` and `https://mainnet.gateway.tenderly.co`. Every broadcast needs the owner's confirmation immediately before it, after a dry run from the same signer; read back the receipt and state before the next one. Never put a private key in a command, file or environment variable.
+The current task authorizes no public broadcast. A read-only mainnet simulation of the right-enabled `Deploy.run()` on 2026-11-17 succeeded and estimated 10,236,025 gas; no signer or transaction was used. This does not replace a signer-specific deployment rehearsal. Any later authorized deployment follows the repository's main-branch and signer rules: use the owner's Foundry keystore `ripe0x` (`--account ripe0x`), Tenderly's public gateway (`https://sepolia.gateway.tenderly.co` or `https://mainnet.gateway.tenderly.co`), a same-signer dry run, explicit owner confirmation immediately before each broadcast and postflight receipt and state reads. Never put a private key in a command, file or environment variable.
+
+## Local right lifecycles
+
+Run both reference lifecycles without RPC, secrets or real assets:
+
+```bash
+forge script script/RightsLifecycle.s.sol:RightsLifecycle --sig "run()"
+```
+
+The script checks the account's authenticated issuer and residual beneficiary before each covered NFT deposit. For an EIP-7702 wallet supporting atomic batches, `test/Eip7702Filler.t.sol` demonstrates `Market.createRight` → NFT deposit to the predicted account → `Right.activate` in one transaction; a failed activation reverts creation and deposit. Run `forge test --match-path test/Eip7702Filler.t.sol --match-test 'test_walletCreatesDepositsAndActivatesCoveredRightAtomically|test_atomicCoveredIssuanceRollsBackInvalidResidualDeposit'`. The batch executor is the existing test wallet example, not a new Market custody contract.
+
+The script requires local chain ID 31337. It deploys local versions of Market and the handlers, creates two fully collateralized NFT purchase rights and an artwork reservation right. For the first NFT, issuer sells the token for a 0.2 ETH premium, buyer resells for 0.3 ETH, and the final holder pays the separate 1 ETH exercise price. A 5% royalty fixed at activation creates 0.05 ETH royalty and 0.95 ETH proceeds credits; beneficiaries withdraw them. For the second NFT, an escrow listing is canceled, its token returned, the right expires, and the residual beneficiary recovers the NFT. The artwork owner transfers the artwork after reservation; the right is sold, resold and exercised for one allowed color change while artwork ownership stays put. Each order's trading deadline precedes its underlying right deadline.
+
+Focused test commands for the same real contract paths and adversarial cases:
+
+```bash
+forge test --match-path test/RightExamples.t.sol
+forge test --match-path test/RightsCore.t.sol
+forge test --match-path test/RightsTrade.t.sol
+```
+
+`script/Lifecycle.s.sol` remains the immediate-order example. Its revocable `PaintAction` permission is not a durable transferable right.
 
 ## Simulate
 
@@ -65,6 +97,8 @@ forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co
 
 ## Rehearse on a fork
 
+The current `script/rehearse.sh` covers ordinary orders only. A right-enabled real-transaction rehearsal remains a release gate.
+
 ```bash
 script/rehearse.sh
 ```
@@ -73,53 +107,13 @@ script/rehearse.sh
 script/rehearse.sh https://mainnet.gateway.tenderly.co
 ```
 
-## Sepolia
+## Sepolia historical procedure
 
-Prerequisites: a `main` checkout (`git checkout main && git pull --ff-only`), the `ripe0x` keystore holding at least 0.05 Sepolia ETH, and `ETHERSCAN_API_KEY` for Etherscan verification (Etherscan's v2 key works for Sepolia).
-
-1. Deploy and verify the supported release (only `FillVerifier` is skipped where it exists; after D306 and D309 `Market`, the new `FeeConfig` and the handlers get new addresses and are deployed), then the example:
-
-   ```bash
-   forge script script/Deploy.s.sol --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --verify --slow --gas-estimate-multiplier 1500
-   ```
-
-   ```bash
-   forge script script/Deploy.s.sol --sig "examples()" --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --verify --slow --gas-estimate-multiplier 1500
-   ```
-
-2. Run the lifecycle with real transactions, then cancel the bid it prints:
-
-   ```bash
-   forge script script/Lifecycle.s.sol --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --slow --gas-estimate-multiplier 1500
-   ```
-
-   ```bash
-   forge script script/Lifecycle.s.sol --sig "recover(address)" <bid order> --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x --sender <ripe0x address> --broadcast --gas-estimate-multiplier 1500
-   ```
-
-3. Record chain ID, addresses, transaction hashes (in `broadcast/*/11155111/run-latest.json`) and explorer links under "Deployment record".
-
-**Why `--gas-estimate-multiplier 1500`.** On 2026-11-06 the first Sepolia deployment attempt used Foundry's default gas limits and ran out of gas (see the record below); the node estimated far more gas for contract creation than Foundry's EVM (5,775,008 against 826,340 for Market). The multiplier sets each limit at 15 times Foundry's estimate; unused gas is not charged. Mainnet needs no multiplier.
-
-If `--verify` misses a contract, verify it directly (replace each address with the one the deploy printed; the planned CREATE2 addresses are in "Addresses"). `FeeConfig` takes the `Market` address, the admin and the recipient; `NFTSale` and `NFTBid` take the `FeeConfig` address:
-
-```bash
-forge verify-contract 0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF handlers/FeeConfig.sol:FeeConfig --chain sepolia --constructor-args $(cast abi-encode "f(address,address,address)" 0x7c91e34703ae3E32812bad1f7251CD0976A31FD4 0xCB43078C32423F5348Cab5885911C3B5faE217F9 0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72) --watch
-```
-
-```bash
-forge verify-contract 0xfEf3a72600a453F82650343525751811120da2c8 handlers/NFTSale.sol:NFTSale --chain sepolia --constructor-args $(cast abi-encode "f(address)" 0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF) --watch
-```
-
-```bash
-forge verify-contract 0x8dbB30441bB0ca607bC17A3ea763C8f66B30017E handlers/NFTBid.sol:NFTBid --chain sepolia --constructor-args $(cast abi-encode "f(address)" 0x9A181B2129540Df9502a30e08a4E4e34Cd7406fF) --watch
-```
-
-`PaintAction` takes no constructor arguments: `forge verify-contract <address> examples/PaintAction.sol:PaintAction --chain sepolia --watch`. Order clones need no verification; explorers that recognize ERC-1167 show them as proxies of the verified implementation.
+The 2026-11-10 and 2026-11-16 order-only releases were deployed from `main` with the `ripe0x` keystore through `https://sepolia.gateway.tenderly.co`. Their exact transactions, addresses, gas and verification notes remain in the deployment record below. The then-used `--gas-estimate-multiplier 1500` followed one out-of-gas deployment attempt; it sets a transaction limit, not the charged gas. Those old addresses and verification arguments must not be used for the right-enabled code. The current task authorizes no public-chain deployment.
 
 ## Mainnet release checklist
 
-Mainnet deployment needs the owner's explicit approval after every item is satisfied. Status on 2026-11-10 in brackets.
+The checklist below records the historical order-only release preparation and its then-current status. It does **not** approve the redesigned right-enabled contracts. A new frozen candidate needs the complete applicable suite, deep invariants, static-analysis triage, economic scorecard, independent review, rehearsal of the right-enabled deployment path, real-transaction rehearsal and capped canary plan, with explicit owner authorization for any external write. No redesigned contract has met those release gates or been broadcast.
 
 1. Freeze a release candidate commit; no Solidity change after it without restarting this list. [Release candidate tagged on `main`; see STATUS.md]
 2. `CANDIDATE_RUN=1 forge test` passes at the candidate, including fork tests. [See STATUS.md]
