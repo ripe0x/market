@@ -179,7 +179,7 @@ Nothing in Market knows what an artwork, a color or a painter is. The same `Mark
 function validate(address account, bytes calldata config) external view returns (bytes memory terms);
 ```
 
-Validate required backing at `account` and return the effective terms that must not change after transfer. The core stores those exact bytes at `Right.activationTerms()`. For a covered NFT, check `ownerOf` and resolve the ERC2981 recipient and amount now, subject to the issuer's configured limit. A revocable approval from another account is not durable backing. A target-enforced reservation may be, if its target prevents owner revocation, replacement and consumption until the committed termination conditions.
+Validate required backing at `account` and return the effective terms that must not change after transfer. The core stores those exact bytes at `Right.activationTerms()`. For a covered NFT, require `right.residual() == right.issuer()` using the authenticated immutable account, check `ownerOf`, and resolve the ERC2981 recipient and amount now, subject to the issuer's configured limit. Buyer surrender or expiry then releases the NFT only to the issuer; issuer surrender after holding or buying back its token is allowed. A revocable approval from another account is not durable backing. A target-enforced reservation may be, if its target prevents owner revocation, replacement and consumption until the committed termination conditions.
 
 Only the actual `Rights.ownerOf(id)` may call `Right.exercise(config, input)`. The core checks state, deadline, config, handler code and the local execution lock, then calls:
 

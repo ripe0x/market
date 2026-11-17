@@ -170,6 +170,25 @@ contract RightsTradeTest is Base {
         assertEq(art.ownerOf(1), address(right));
     }
 
+    function test_issuerBuysBackRightAndSurrendersWithoutExercise() public {
+        uint256 id = right.tokenId();
+        vm.prank(seller);
+        rights.transferFrom(seller, buyer, id);
+        (Order listing, bytes memory saleConfig) = _listing(buyer, PREMIUM);
+        vm.deal(seller, PREMIUM);
+        vm.prank(seller);
+        listing.fill{value: PREMIUM}(saleConfig, abi.encode(seller, PREMIUM));
+        assertEq(rights.ownerOf(id), seller);
+        assertEq(buyer.balance, 100.198 ether, "buyer receives resale premium less trading fee");
+        assertEq(treasury.balance, 0.002 ether);
+        vm.prank(seller);
+        right.surrender();
+        vm.prank(seller);
+        right.recover(address(art), 0, abi.encodeCall(IERC721.transferFrom, (address(right), seller, 1)));
+        assertEq(art.ownerOf(1), seller);
+        assertEq(right.totalCredits(), 0, "no exercise payment or royalty on issuer release");
+    }
+
     function test_expiredEscrowCannotSettleBeforeFinalization() public {
         (Order listing, bytes memory saleConfig) = _listing(seller, PREMIUM);
         vm.warp(rightDeadline);
@@ -291,7 +310,7 @@ contract RightsTradeTest is Base {
         token.setRoyalty(address(raider), 500);
         bytes memory config = abi.encode(CoveredNFTPurchase.Config(token, 4, PRICE, seller, 500));
         vm.prank(seller);
-        Right account = market.createRight(purchase, config, rightDeadline, address(raider), bytes32(uint256(6)));
+        Right account = market.createRight(purchase, config, rightDeadline, seller, bytes32(uint256(6)));
         raider.setRight(account);
         vm.prank(seller);
         token.transferFrom(seller, address(account), 4);

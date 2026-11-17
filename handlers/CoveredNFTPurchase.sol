@@ -27,6 +27,7 @@ contract CoveredNFTPurchase is IExerciseHandler {
     error NotExercising();
     error NotCovered();
     error InvalidTerms();
+    error ResidualNotIssuer();
     error WrongPayment(uint256 expected, uint256 actual);
     error NotDelivered();
 
@@ -37,12 +38,12 @@ contract CoveredNFTPurchase is IExerciseHandler {
     /// @dev Returned bytes are stored by the right at activation. Royalty lookup is never
     /// repeated at exercise, so later changes to the NFT's royalty settings cannot reprice it.
     function validate(address account, bytes calldata config) external view returns (bytes memory terms) {
-        if (
-            !market.isRight(account) || msg.sender != account
-                || address(Right(payable(account)).handler()) != address(this)
-        ) {
+        if (!market.isRight(account) || msg.sender != account) {
             revert NotRight();
         }
+        Right right = Right(payable(account));
+        if (address(right.handler()) != address(this)) revert NotRight();
+        if (right.residual() != right.issuer()) revert ResidualNotIssuer();
         Config memory c = abi.decode(config, (Config));
         if (c.proceedsTo == address(0) || c.maxRoyaltyBps > 10_000) revert InvalidTerms();
         if (c.nft.ownerOf(c.tokenId) != account) revert NotCovered();

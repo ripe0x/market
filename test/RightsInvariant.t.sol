@@ -19,7 +19,7 @@ contract RightsDriver is Test {
     bytes public config;
     address public issuer = makeAddr("issuer");
     address public royalty = makeAddr("royalty");
-    address public residual = makeAddr("residual");
+    address public residual = issuer;
     address[3] public holders = [makeAddr("holder0"), makeAddr("holder1"), makeAddr("holder2")];
     address public deliveredTo;
     uint256 public deadline;

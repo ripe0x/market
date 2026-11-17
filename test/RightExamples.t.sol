@@ -69,7 +69,7 @@ contract RightExamplesTest is Test {
         right.recover(issuer, 1, "");
     }
 
-    function test_holderWhoIsAlsoResidualUsesResidualAuthorityAfterSurrender() public {
+    function test_coveredPurchaseRejectsNonIssuerResidualAtActivation() public {
         RoyaltyNFT nft = new RoyaltyNFT();
         nft.mint(issuer, 9);
         nft.setRoyalty(makeAddr("royalty"), 500);
@@ -79,21 +79,73 @@ contract RightExamplesTest is Test {
         vm.prank(issuer);
         nft.transferFrom(issuer, address(right), 9);
         vm.prank(issuer);
+        vm.expectRevert(CoveredNFTPurchase.ResidualNotIssuer.selector);
         right.activate(config);
+        assertEq(uint256(right.state()), uint256(Right.State.Pending));
+        uint256 id = right.tokenId();
+        vm.expectRevert();
+        rights.ownerOf(id);
+    }
+
+    function _covered(uint256 tokenId) internal returns (RoyaltyNFT nft, Right right, bytes memory config) {
+        nft = new RoyaltyNFT();
+        nft.mint(issuer, tokenId);
+        nft.setRoyalty(makeAddr("royalty"), 500);
+        config = abi.encode(CoveredNFTPurchase.Config(nft, tokenId, 1 ether, issuer, 500));
+        vm.prank(issuer);
+        right = market.createRight(purchase, config, DEADLINE, issuer, bytes32(tokenId));
+        vm.prank(issuer);
+        nft.transferFrom(issuer, address(right), tokenId);
+        vm.prank(issuer);
+        right.activate(config);
+    }
+
+    function test_buyerSurrenderReleasesCollateralOnlyToIssuer() public {
+        (RoyaltyNFT nft, Right right,) = _covered(10);
         uint256 id = right.tokenId();
         vm.prank(issuer);
         rights.transferFrom(issuer, buyer, id);
-
-        vm.prank(buyer);
-        vm.expectRevert(Right.WrongState.selector);
-        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 9)));
         vm.prank(buyer);
         right.surrender();
         vm.prank(buyer);
-        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 9)));
-        assertEq(nft.ownerOf(9), buyer);
+        vm.expectRevert(Right.Unauthorized.selector);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 10)));
+        vm.prank(issuer);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), issuer, 10)));
+        assertEq(nft.ownerOf(10), issuer);
+        assertEq(right.totalCredits(), 0, "surrender is not an exercise royalty event");
+        assertEq(buyer.balance, 10 ether);
+    }
+
+    function test_buyerExpiryReleasesCollateralOnlyToIssuer() public {
+        (RoyaltyNFT nft, Right right, bytes memory config) = _covered(11);
+        uint256 id = right.tokenId();
+        vm.prank(issuer);
+        rights.transferFrom(issuer, buyer, id);
+        vm.warp(DEADLINE);
+        vm.prank(buyer);
+        vm.expectRevert(Right.DeadlinePassed.selector);
+        right.exercise{value: 1 ether}(config, abi.encode(buyer));
+        vm.prank(reseller);
+        right.finalizeExpiry();
+        vm.prank(buyer);
+        vm.expectRevert(Right.Unauthorized.selector);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 11)));
+        vm.prank(issuer);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), issuer, 11)));
+        assertEq(nft.ownerOf(11), issuer);
+        assertEq(right.totalCredits(), 0, "expiry is not an exercise royalty event");
+        assertEq(buyer.balance, 10 ether);
+    }
+
+    function test_issuerSurrendersUnsoldRightAndRecoversCollateral() public {
+        (RoyaltyNFT nft, Right right,) = _covered(12);
+        vm.prank(issuer);
+        right.surrender();
+        vm.prank(issuer);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), issuer, 12)));
+        assertEq(nft.ownerOf(12), issuer);
         assertEq(right.totalCredits(), 0);
-        assertEq(issuer.balance, 0);
     }
 
     function test_coveredNFTRequiresActualCollateralAndExactPayment() public {
