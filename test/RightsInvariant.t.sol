@@ -75,6 +75,7 @@ contract RightsDriver is Test {
     uint256 public nftRecoveries;
     uint256 public ethRecoveries;
     uint256 public creditWithdrawals;
+    uint256 public fundings;
     uint256 public bypassAttempts;
     uint256 public skipped;
     bool public bypassSucceeded;
@@ -151,6 +152,17 @@ contract RightsDriver is Test {
         _create(seed);
     }
 
+    function issue(uint256 seed) external {
+        if (entries.length == MAX_RIGHTS) {
+            skipped++;
+            return;
+        }
+        _create(seed);
+        uint256 i = entries.length - 1;
+        _deposit(i);
+        _activate(i);
+    }
+
     function deposit(uint256 seed) external {
         (uint256 i, bool found) = _pick(seed, 1);
         if (!found) {
@@ -192,6 +204,7 @@ contract RightsDriver is Test {
         assertTrue(ok);
         e.ethDeposited += DEPOSIT;
         netEth[issuer] -= int256(DEPOSIT);
+        fundings++;
     }
 
     function transfer(uint256 seed) external {
@@ -628,15 +641,20 @@ contract RightsInvariantTest is StdInvariant, Test {
     /// @notice Foundry calls this after each invariant run; events expose reached transitions.
     function afterInvariant() public {
         emit log_named_uint("rights created", driver.created());
+        emit log_named_uint("rights collateral deposits", driver.collateralDeposits());
+        emit log_named_uint("rights ETH fundings", driver.fundings());
         emit log_named_uint("rights activated", driver.activations());
         emit log_named_uint("rights transferred", driver.transfers());
         emit log_named_uint("rights listed", driver.listings());
         emit log_named_uint("rights sold", driver.sales());
         emit log_named_uint("rights listing cancels", driver.listingCancellations());
+        emit log_named_uint("rights stale listings closed", driver.staleListingsClosed());
         emit log_named_uint("rights exercised", driver.exercises());
-        emit log_named_uint("rights expired", driver.expiries());
+        emit log_named_uint("rights pending-or-active finalizations", driver.expiries());
         emit log_named_uint("rights surrendered", driver.surrenders());
+        emit log_named_uint("rights setup cancels", driver.setupCancellations());
         emit log_named_uint("rights recovered", driver.nftRecoveries());
+        emit log_named_uint("rights ETH recoveries", driver.ethRecoveries());
         emit log_named_uint("rights credit withdrawals", driver.creditWithdrawals());
         emit log_named_uint("rights bypass attempts", driver.bypassAttempts());
         emit log_named_uint("rights skipped", driver.skipped());
