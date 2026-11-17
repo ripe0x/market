@@ -154,10 +154,11 @@ contract Right {
     function finalizeExpiry() external {
         _requireRight();
         if (exercising) revert Reentrant();
-        if (state != State.Active) revert WrongState();
+        State previous = state;
+        if (previous != State.Pending && previous != State.Active) revert WrongState();
         if (!_deadlinePassed() || deadline() == 0) revert NotExpired();
         state = State.Expired;
-        rights.burn(tokenId());
+        if (previous == State.Active) rights.burn(tokenId());
         emit Expired();
     }
 

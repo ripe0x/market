@@ -160,6 +160,21 @@ contract RightsCoreTest is Test {
         assertEq(residual.balance, 1 ether);
     }
 
+    function test_expiredPendingSetupFinalizesWithoutIssuer() public {
+        uint256 end = block.timestamp + 100;
+        Right account = _pending(end);
+        vm.warp(end);
+        vm.prank(buyer);
+        account.finalizeExpiry();
+        assertEq(uint256(account.state()), uint256(Right.State.Expired));
+        vm.prank(residual);
+        account.recover(residual, 1 ether, "");
+        assertEq(residual.balance, 1 ether);
+        vm.prank(issuer);
+        vm.expectRevert(Right.WrongState.selector);
+        account.activate(config);
+    }
+
     function test_transferExerciseAndReservedCredits() public {
         Right account = _active(block.timestamp + 1 days);
         uint256 id = account.tokenId();

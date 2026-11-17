@@ -14,10 +14,10 @@ This note precedes implementation. The new object is a one-use entitlement, sepa
 
 | State | Entry | Permitted transition | Account authority |
 | --- | --- | --- | --- |
-| Pending | Creation | Validate backing and activate; issuer cancels setup | No generic execution |
+| Pending | Creation | Validate backing and activate before deadline; issuer cancels setup; anyone finalizes at deadline | No generic execution |
 | Active | Activation mints token to issuer | Holder exercise or surrender; anyone finalizes at deadline | Bound handler only, during the local execution lock |
 | Exercised | Successful exercise burns token | None | Residual recovery of unencumbered balance and stray assets |
-| Expired | Anyone finalizes at or after deadline, burning token | None | Same terminal recovery |
+| Expired | Anyone finalizes pending or active setup at or after deadline, burning a token only if one was minted | None | Same terminal recovery |
 | Surrendered | Holder burns token | None | Same terminal recovery |
 | Canceled | Issuer cancels pending setup | None | Same terminal recovery |
 
@@ -26,5 +26,7 @@ The deadline boundary is exclusive: at `block.timestamp >= deadline`, exercise, 
 Activation calls the pinned handler's read-only validation and stores its returned terms on the account before minting. Supported NFT purchase validation checks custody, fixed price and the royalty recipient and amount; those royalty terms cannot later be recomputed. Artwork validation checks a target-enforced reservation that survives artwork transfer. A generic permissionless handler remains a trust choice, and a revocable external grant is never certified as durable.
 
 The account tracks ETH payment credits by beneficiary and reserves their total before any further outbound ETH call, including terminal recovery. A beneficiary may withdraw its credit to a chosen recipient, so a beneficiary contract that rejects ETH at its own address can still collect through an accepting destination. Exercise requires exact payment in the supported NFT purchase handler. NFT delivery is checked by `ownerOf` after the transfer. Failed exercise reverts the entire transaction, including credits and burn. Residual recovery is handler independent and cannot spend outstanding credits. External permissions are not automatically revoked by termination; supported target logic consumes or disables them. Counterparties must not approve an account that a residual beneficiary could later control.
+
+Roles may overlap. If the holder is also the residual beneficiary, it can surrender and then recover backing without exercising or paying; this follows the issuer's committed residual allocation, not token ownership alone. A royalty recipient contract with no callable withdrawal path leaves its credit solvent but uncollected. A perpetual pending setup has no deadline-based cleanup if its issuer disappears; it never mints a transferable token.
 
 The existing NFT trading fee and ERC2981 sale royalty apply to right-token premiums through ordinary `NFTSale` or a specific-token `NFTBid`. The rights collection itself advertises no ERC2981 royalty, so resale premiums carry no underlying-NFT royalty. Exercise has no trading fee. The covered NFT's one exercise royalty is fixed at activation and credited on exercise. Collection-wide bids for canonical rights are refused. Escrowing a token in a sale makes that sale order its actual holder; the former holder cannot exercise it until the token is returned or sold. Trading deadlines should leave a deliberate exercise window, but a generic buyer must inspect the right's deadline and terms.

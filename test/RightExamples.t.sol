@@ -63,6 +63,37 @@ contract RightExamplesTest is Test {
         assertEq(issuer.balance, 0.95 ether);
         assertEq(right.totalCredits(), 0.05 ether);
         assertEq(address(right).balance, 0.05 ether);
+        assertEq(address(royaltyTo).balance, 0, "receiver has no callable withdrawal path");
+        vm.prank(issuer);
+        vm.expectRevert(Right.EncumberedBalance.selector);
+        right.recover(issuer, 1, "");
+    }
+
+    function test_holderWhoIsAlsoResidualUsesResidualAuthorityAfterSurrender() public {
+        RoyaltyNFT nft = new RoyaltyNFT();
+        nft.mint(issuer, 9);
+        nft.setRoyalty(makeAddr("royalty"), 500);
+        bytes memory config = abi.encode(CoveredNFTPurchase.Config(nft, 9, 1 ether, issuer, 500));
+        vm.prank(issuer);
+        Right right = market.createRight(purchase, config, DEADLINE, buyer, bytes32(uint256(9)));
+        vm.prank(issuer);
+        nft.transferFrom(issuer, address(right), 9);
+        vm.prank(issuer);
+        right.activate(config);
+        uint256 id = right.tokenId();
+        vm.prank(issuer);
+        rights.transferFrom(issuer, buyer, id);
+
+        vm.prank(buyer);
+        vm.expectRevert(Right.WrongState.selector);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 9)));
+        vm.prank(buyer);
+        right.surrender();
+        vm.prank(buyer);
+        right.recover(address(nft), 0, abi.encodeCall(nft.transferFrom, (address(right), buyer, 9)));
+        assertEq(nft.ownerOf(9), buyer);
+        assertEq(right.totalCredits(), 0);
+        assertEq(issuer.balance, 0);
     }
 
     function test_coveredNFTRequiresActualCollateralAndExactPayment() public {
