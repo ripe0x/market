@@ -65,7 +65,9 @@ contract ReentryHolder {
         (bool c,) = address(right).call(abi.encodeCall(Right.finalizeExpiry, ()));
         (bool d,) = address(right).call(abi.encodeCall(Right.recover, (address(this), 0, "")));
         (bool e,) = address(right).call(abi.encodeCall(Right.exercise, ("", "")));
-        anySucceeded = a || b || c || d || e;
+        (bool f,) = address(right).call(abi.encodeCall(Right.releaseCredit, (address(this))));
+        (bool g,) = address(right).call(abi.encodeCall(Right.withdrawCredit, (payable(address(this)))));
+        anySucceeded = a || b || c || d || e || f || g;
     }
 
     receive() external payable {}

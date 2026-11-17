@@ -180,17 +180,27 @@ contract Right {
         emit Credited(beneficiary, amount);
     }
 
+    /// @notice Anyone may pay a recorded beneficiary, but cannot change the destination.
+    function releaseCredit(address beneficiary) external {
+        _withdrawCredit(beneficiary, payable(beneficiary));
+    }
+
+    /// @notice A beneficiary may redirect only its own credit.
     function withdrawCredit(address payable recipient) external {
+        _withdrawCredit(msg.sender, recipient);
+    }
+
+    function _withdrawCredit(address beneficiary, address payable recipient) private {
         _requireRight();
         if (exercising) revert Reentrant();
         if (recipient == address(0)) revert ZeroBeneficiary();
-        uint256 amount = creditOf[msg.sender];
+        uint256 amount = creditOf[beneficiary];
         if (amount == 0) return;
-        creditOf[msg.sender] = 0;
+        creditOf[beneficiary] = 0;
         totalCredits -= amount;
         (bool ok,) = recipient.call{value: amount}("");
         require(ok, "credit transfer failed");
-        emit CreditWithdrawn(msg.sender, recipient, amount);
+        emit CreditWithdrawn(beneficiary, recipient, amount);
     }
 
     /// @notice Terminal recovery by the committed residual beneficiary, never from credits.

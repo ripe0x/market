@@ -71,6 +71,8 @@ Run both reference lifecycles without RPC, secrets or real assets:
 forge script script/RightsLifecycle.s.sol:RightsLifecycle --sig "run()"
 ```
 
+The script checks the account's authenticated issuer and residual beneficiary before each covered NFT deposit. For an EIP-7702 wallet supporting atomic batches, `test/Eip7702Filler.t.sol` demonstrates `Market.createRight` → NFT deposit to the predicted account → `Right.activate` in one transaction; a failed activation reverts creation and deposit. Run `forge test --match-path test/Eip7702Filler.t.sol --match-test 'test_walletCreatesDepositsAndActivatesCoveredRightAtomically|test_atomicCoveredIssuanceRollsBackInvalidResidualDeposit'`. The batch executor is the existing test wallet example, not a new Market custody contract.
+
 The script requires local chain ID 31337. It deploys local versions of Market and the handlers, creates two fully collateralized NFT purchase rights and an artwork reservation right. For the first NFT, issuer sells the token for a 0.2 ETH premium, buyer resells for 0.3 ETH, and the final holder pays the separate 1 ETH exercise price. A 5% royalty fixed at activation creates 0.05 ETH royalty and 0.95 ETH proceeds credits; beneficiaries withdraw them. For the second NFT, an escrow listing is canceled, its token returned, the right expires, and the residual beneficiary recovers the NFT. The artwork owner transfers the artwork after reservation; the right is sold, resold and exercised for one allowed color change while artwork ownership stays put. Each order's trading deadline precedes its underlying right deadline.
 
 Focused test commands for the same real contract paths and adversarial cases:

@@ -67,5 +67,12 @@ contract RightsForkTest is Test {
         assertEq(account.totalCredits(), 1 ether);
         assertEq(address(account).balance, 1 ether);
         assertEq(uint256(account.state()), uint256(Right.State.Exercised));
+        if (royalty != 0) {
+            uint256 before = royaltyTo.balance;
+            account.releaseCredit(royaltyTo);
+            assertEq(royaltyTo.balance, before + royalty, "real royalty recipient receives ETH");
+            assertEq(account.creditOf(royaltyTo), 0);
+            assertEq(account.totalCredits(), 1 ether - royalty);
+        }
     }
 }

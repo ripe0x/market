@@ -9,6 +9,8 @@ import {FillVerifier} from "../periphery/FillVerifier.sol";
 import {NFTBid} from "../handlers/NFTBid.sol";
 import {Base} from "./utils/Base.sol";
 import {TestToken} from "./utils/Mocks.sol";
+import {CoveredNFTPurchase} from "../handlers/CoveredNFTPurchase.sol";
+import {Right} from "../src/Right.sol";
 
 /// Stands in for a smart wallet's batch executor, which an EOA delegates to with EIP-7702.
 /// It runs calls as the EOA, all or nothing, and knows nothing about Market.
@@ -86,6 +88,40 @@ contract Eip7702FillerTest is Base {
         WalletBatch(payable(eoa)).execute(calls);
     }
 
+    function _issueCovered(address residual) internal returns (address predicted, WalletBatch.Call[] memory calls) {
+        CoveredNFTPurchase purchase = new CoveredNFTPurchase(market);
+        nft.mint(eoa, 99);
+        bytes memory config = abi.encode(CoveredNFTPurchase.Config(nft, 99, 1 ether, eoa, 0));
+        uint256 deadline = block.timestamp + 7 days;
+        predicted = market.rightAddress(eoa, purchase, keccak256(config), deadline, residual, bytes32(uint256(99)));
+        calls = new WalletBatch.Call[](3);
+        calls[0] = WalletBatch.Call(
+            address(market),
+            0,
+            abi.encodeCall(Market.createRight, (purchase, config, deadline, residual, bytes32(uint256(99))))
+        );
+        calls[1] = WalletBatch.Call(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (eoa, predicted, 99)));
+        calls[2] = WalletBatch.Call(predicted, 0, abi.encodeCall(Right.activate, (config)));
+    }
+
+    function test_walletCreatesDepositsAndActivatesCoveredRightAtomically() public {
+        (address predicted, WalletBatch.Call[] memory calls) = _issueCovered(eoa);
+        this.run(calls);
+        assertEq(nft.ownerOf(99), predicted);
+        assertEq(market.rights().ownerOf(uint256(uint160(predicted))), eoa);
+        assertEq(Right(payable(predicted)).issuer(), eoa);
+        assertEq(Right(payable(predicted)).residual(), eoa);
+    }
+
+    function test_atomicCoveredIssuanceRollsBackInvalidResidualDeposit() public {
+        (address predicted, WalletBatch.Call[] memory calls) = _issueCovered(attacker);
+        vm.expectRevert(CoveredNFTPurchase.ResidualNotIssuer.selector);
+        this.run(calls);
+        assertEq(nft.ownerOf(99), eoa, "collateral never left the wallet");
+        assertFalse(market.isRight(predicted));
+        assertEq(predicted.code.length, 0, "creation rolled back too");
+    }
+
     function test_dishonestHandlerFailsTheWalletsCheck() public {
         bytes memory config = abi.encode(address(take), uint256(10));
         Order order = _create(attacker, new PullOnlyHandler(), config);
@@ -102,8 +138,10 @@ contract Eip7702FillerTest is Base {
         bytes memory myNfts = abi.encodeCall(IERC721.balanceOf, (eoa));
         WalletBatch.Call[] memory calls = new WalletBatch.Call[](3);
         calls[0] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.snapshot, (address(nft), myNfts)));
-        calls[1] = WalletBatch.Call(address(order), 1 ether, abi.encodeCall(Order.fill, (config, abi.encode(eoa, 1 ether))));
-        calls[2] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(nft), myNfts, 1)));
+        calls[1] =
+            WalletBatch.Call(address(order), 1 ether, abi.encodeCall(Order.fill, (config, abi.encode(eoa, 1 ether))));
+        calls[2] =
+            WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(nft), myNfts, 1)));
         this.run(calls);
         assertEq(nft.ownerOf(7), eoa);
         assertEq(seller.balance, 0.99 ether, "1 less the 1% fee");
@@ -122,7 +160,8 @@ contract Eip7702FillerTest is Base {
         WalletBatch.Call[] memory calls = new WalletBatch.Call[](4);
         calls[0] = WalletBatch.Call(address(verifier), 0, abi.encodeCall(verifier.snapshot, (address(verifier), myEth)));
         calls[1] = WalletBatch.Call(address(nft), 0, abi.encodeCall(IERC721.approve, (address(bids), 7)));
-        calls[2] = WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 0.99 ether, eoa))));
+        calls[2] =
+            WalletBatch.Call(address(bid), 0, abi.encodeCall(Order.fill, (config, abi.encode(7, 0.99 ether, eoa))));
         calls[3] = WalletBatch.Call(
             address(verifier), 0, abi.encodeCall(verifier.requireIncrease, (address(verifier), myEth, 0.99 ether))
         );

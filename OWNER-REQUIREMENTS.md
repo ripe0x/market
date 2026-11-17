@@ -66,6 +66,7 @@ The owner explicitly approved a new product direction and core architecture in t
 | R19 | "Do not automatically apply the underlying nft's royalty policy to every resale of a right token." | O16 |
 | R20 | "Do not deploy contracts, broadcast transactions, use real assets, merge into main, or push changes without explicit authorization." | Local-only delivery |
 | R21 | "Require residualBeneficiary == issuer when activating a covered nft right, using the account’s authenticated, immutable issuer"; "Keep the core’s configurable residual beneficiary." | O18, D410 |
+| R22 | "Support two distinct withdrawal paths"; "add a permissionless releaseCredit(beneficiary) while retaining the existing beneficiary-controlled withdrawCredit(recipient)". | O19, D411 |
 
 | # | Prospective outcome | Number and asset destination |
 | --- | --- | --- |
@@ -77,6 +78,7 @@ The owner explicitly approved a new product direction and core architecture in t
 | O16 | Premium and exercise economics are separate. | Primary or resale premium L pays the ordinary trading fee F and no underlying NFT royalty; listing seller receives L − F. One exercise payment P carries one committed royalty R and no trading fee. Ordinary direct NFT sales retain historical O1–O5. |
 | O17 | Reserved artwork action is target enforced, including through artwork transfer. | 1 allowed modification, 0 artwork ownership transfer, 0 owner revocations or replacements of a live reservation. No permanent color guarantee. |
 | O18 | Covered NFT activation requires the immutable issuer as residual beneficiary. Buyer surrender or expiry of an activated right releases collateral to that issuer; issuer surrender while holding or after buyback remains allowed. | 0 activations with non-issuer residual; an activated right's buyer receives 0 NFT and pays 0 exercise ETH after surrender or expiry; issuer recovers 1 NFT. A successful 1 ETH exercise at 5% committed royalty credits 0.05 ETH royalty and 0.95 ETH proceeds. Surrender and expiry create 0 exercise royalty. |
+| O19 | A third party can pay an accepting recorded beneficiary; only the beneficiary can redirect. Failed payout preserves completed exercise and all remaining liability. | For a 0.05 ETH royalty credit, third-party release sends exactly 0.05 ETH to that receiver and 0 ETH to caller. A refusing receiver keeps its 0.05 ETH credit; the 0.95 ETH proceeds credit remains independently withdrawable. |
 
 No exact gas, premium, exercise price, royalty rate, deadline length or release cap is approved here; those depend on a particular right and the release candidate. The economic scorecard must supply concrete launch-scale examples and measured gas before a real deployment decision.
 

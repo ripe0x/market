@@ -59,6 +59,7 @@ contract RightsLifecycle is Script {
         bytes memory config = abi.encode(CoveredNFTPurchase.Config(nft, 1, 1 ether, ISSUER, 1000));
         vm.prank(ISSUER);
         Right right = market.createRight(purchase, config, vm.getBlockTimestamp() + 7 days, ISSUER, bytes32(uint256(1)));
+        require(right.issuer() == ISSUER && right.residual() == ISSUER, "check issuer residual before deposit");
         vm.prank(ISSUER);
         nft.transferFrom(ISSUER, address(right), 1);
         vm.prank(ISSUER);
@@ -73,8 +74,7 @@ contract RightsLifecycle is Script {
         right.exercise{value: 1 ether}(config, abi.encode(HOLDER));
         require(nft.ownerOf(1) == HOLDER && right.state() == Right.State.Exercised, "exercise delivery");
         require(right.creditOf(ROYALTY) == 0.05 ether && right.creditOf(ISSUER) == 0.95 ether, "fixed payment split");
-        vm.prank(ROYALTY);
-        right.withdrawCredit(payable(ROYALTY));
+        right.releaseCredit(ROYALTY);
         vm.prank(ISSUER);
         right.withdrawCredit(payable(ISSUER));
         require(address(right).balance == 0, "credits withdrawn");
@@ -86,6 +86,7 @@ contract RightsLifecycle is Script {
         uint256 deadline = vm.getBlockTimestamp() + 4 days;
         vm.prank(ISSUER);
         Right right = market.createRight(purchase, config, deadline, ISSUER, bytes32(uint256(2)));
+        require(right.issuer() == ISSUER && right.residual() == ISSUER, "check issuer residual before deposit");
         vm.prank(ISSUER);
         nft.transferFrom(ISSUER, address(right), 2);
         vm.prank(ISSUER);
