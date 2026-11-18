@@ -7,11 +7,11 @@ import {IExerciseHandler, Right} from "./Right.sol";
 import {Rights} from "./Rights.sol";
 
 /// @title Market
-/// @notice Deploys orders, records when, and announces them. Holds nothing, owns nothing, takes
-/// no fee and cannot call anything, so an approval or transfer to this contract grants no
-/// authority.
+/// @notice Factory for Order and Right accounts and their canonical Rights token. Creation
+/// forwards the supplied ETH to the new account. Market charges no fee and exposes no asset
+/// withdrawal or arbitrary execution function; assets sent to Market cannot be recovered here.
 contract Market {
-    /// @notice The code every order runs, deployed with Market. Nothing can change it.
+    /// @notice The immutable Order implementation deployed with Market.
     address public immutable implementation = address(new Order());
     Rights public immutable rights;
     address public immutable rightImplementation;
@@ -26,10 +26,13 @@ contract Market {
     /// did not deploy. Handlers can use it to apply terms in force when the order was created.
     mapping(Order order => uint256) public createdAt;
 
-    /// @notice `config` is published here so anyone can rebuild and fill the order without an indexer.
+    /// @notice Publishes the order identity, owner, handler, salt and full configuration bytes.
+    /// The account stores the configuration hash in its immutable arguments.
     event Created(
         Order indexed order, address indexed owner, IOrderHandler indexed handler, bytes32 salt, bytes config
     );
+    /// @notice Publishes the right account, issuer, handler, salt and full configuration bytes.
+    /// The account stores the configuration hash in its immutable arguments.
     event RightCreated(
         Right indexed account, address indexed issuer, IExerciseHandler indexed handler, bytes32 salt, bytes config
     );
@@ -41,7 +44,8 @@ contract Market {
 
     /// @notice Deploy an order owned by the caller. Any ETH sent funds the order.
     /// The address commits to the owner, handler, the handler's current code, config hash and
-    /// salt; see `orderAddress`.
+    /// salt; see `orderAddress`. The code hash commits to runtime bytecode, not handler storage
+    /// or external dependencies.
     function create(IOrderHandler handler, bytes calldata config, bytes32 salt) external payable returns (Order order) {
         _checkHandler(address(handler));
         address clone = Clones.cloneDeterministicWithImmutableArgs(

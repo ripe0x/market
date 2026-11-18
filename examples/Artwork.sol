@@ -6,10 +6,10 @@ import {Market} from "../src/Market.sol";
 import {Right} from "../src/Right.sol";
 
 /// @title Artwork
-/// @notice Example 3's artwork, independent of Market. Each token has a color. Its owner may
-/// paint it, and may name one painter who can paint it too. A painter can resign, and any
-/// transfer of the token removes its painter. A separately reserved one-use repaint survives
-/// transfer and can be consumed only through its live Market right.
+/// @notice Each token has a color. Its owner may paint it or assign a revocable painter.
+/// Transfer clears the painter. A one-use repaint reservation survives transfer and can be
+/// consumed during its right's exercise. The configured immutable Market authenticates a
+/// candidate reservation account before any account getters are called.
 contract Artwork is ERC721 {
     struct Reservation {
         address right;
@@ -79,6 +79,8 @@ contract Artwork is ERC721 {
         emit Painted(tokenId, color, msg.sender);
     }
 
+    /// @dev An active, unexpired reservation remains live during exercise, when Right.isLive
+    /// returns false. This permits paintReserved to consume the reservation under its lock.
     function _live(address account) private view returns (bool) {
         if (account == address(0)) return false;
         Right right = Right(payable(account));

@@ -10,7 +10,9 @@ interface IRightsMarket {
     function isRight(address account) external view returns (bool);
 }
 
-/// @notice Canonical ownership of Market-created execution rights. There is no public burn.
+/// @notice Canonical ERC721 ownership of Market-created execution rights. Only a canonical
+/// backing account can mint or burn its token as its lifecycle permits. Holders cannot burn
+/// independently of that account's surrender, expiry or exercise transition.
 contract Rights is ERC721 {
     using Strings for uint256;
     using Strings for address;

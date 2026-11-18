@@ -78,8 +78,9 @@ contract NFTBid is NFTTrade {
         return abi.encode(price, royalty, fee);
     }
 
-    /// @notice What `order` would pay now for `tokenId` and how it splits; reverts when a fill
-    /// would, except for the seller's own limit and the token transfer.
+    /// @notice Calculate price and split, checking the token selection, canonical right
+    /// liveness, schedule and order ETH balance. Does not authenticate the order or config,
+    /// check closure, remaining fills, recipient, seller limits or approvals, or prove delivery.
     function quote(address order, Config memory c, uint256 tokenId)
         public
         view

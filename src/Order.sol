@@ -3,15 +3,16 @@ pragma solidity ^0.8.28;
 
 /// @notice Defines what happens when an order is filled: checks conditions, decides which calls
 /// the order makes and may keep state between fills. One handler can serve many orders.
-/// @dev A handler acts only by calling back `Order.execute` on the order that called it, and
-/// keys any state by that order. It should hold no assets and no authority of its own, because
-/// every order bound to it calls it, and anyone can call it directly while pretending to be an
-/// order.
+/// @dev Order.execute grants authority over the calling order only during its fill. A handler
+/// must authenticate its caller before using separately granted authority or trusting fill
+/// context. NFTBid uses ERC721 approvals granted to the shared handler. State shared between
+/// orders must be keyed by the authenticated order.
 interface IOrderHandler {
     /// @notice Called by an order from inside `Order.fill`. While this call runs, and only
     /// then, `msg.sender.execute` accepts calls from this handler. Revert to reject the fill;
     /// everything the fill did is undone.
-    /// @param caller The account that called `fill`. The only account a fill may take from.
+    /// @param caller The authenticated account that called fill. The handler must enforce
+    /// any limits on using that account's assets or approvals.
     /// @param value ETH sent with `fill`. The order already holds it.
     /// @param config The order's configuration. The order has checked it against its commitment.
     /// @param input The caller's parameters. Untrusted.
@@ -22,13 +23,16 @@ interface IOrderHandler {
 }
 
 /// @title Order
-/// @notice An account holding one authorized execution commitment. Every order is an ERC-1167
-/// clone of this contract deployed by `Market`, with its own address, balance and storage.
+/// @notice A cancelable execution account with its own address, balance and storage. Market
+/// creates ERC-1167 clones with immutable arguments. Compatible clones can also be deployed
+/// outside Market; those accounts have no Market.createdAt record.
 ///
 /// Authority over this account's assets and permissions follows its lifecycle:
 /// - Active: only `handler`, only during a fill, which anyone may start by calling `fill`.
 ///   The owner may only `close`.
-/// - Closed, permanently: only `owner`, for recovery and revocation. No more fills.
+/// - Closed, permanently: no more fills. The current fill retains handler execution authority
+///   until it returns; otherwise only `owner` can execute for recovery and revocation.
+/// Recovery remains subject to external asset rules, including Rights transfer restrictions.
 ///
 /// The owner, the handler, the handler's code hash and the hash of its configuration are
 /// appended to the clone's code at deployment, so they are part of the order's address and can
@@ -36,7 +40,7 @@ interface IOrderHandler {
 /// The only `delegatecall` is the clone's own, to this fixed code; there is no upgrade path and
 /// no other privileged party.
 contract Order {
-    /// @notice Permanently stops fills and hands `execute` to the owner.
+    /// @notice Permanently stops new fills. Owner execution begins after any current fill ends.
     bool public closed;
     /// @notice True only while `fill` is running. External contracts that grant this order
     /// authority can check it to accept calls made through the handler and refuse the owner.
@@ -64,7 +68,8 @@ contract Order {
         return IOrderHandler(address(bytes20(_arg(20))));
     }
 
-    /// @notice The handler's code hash when this order was created. Fills require it unchanged.
+    /// @notice Committed handler runtime bytecode hash. Fills require it unchanged; mutable
+    /// handler storage and external dependencies are not committed by this hash.
     function handlerCodehash() public view returns (bytes32) {
         return _arg(40);
     }
@@ -73,8 +78,9 @@ contract Order {
         return _arg(72);
     }
 
-    /// @notice Ask this order to execute. The handler decides what happens and may take
-    /// payment only from `msg.sender`. Reverts entirely if any part fails.
+    /// @notice Invoke the bound handler with the caller, value and committed configuration.
+    /// The handler defines settlement conditions and payment authorization. A handler revert
+    /// rolls back the entire fill.
     function fill(bytes calldata config, bytes calldata input) external payable returns (bytes memory result) {
         if (closed) revert OrderClosed();
         if (filling) revert Reentrant();
@@ -104,10 +110,10 @@ contract Order {
         }
     }
 
-    /// @notice Stop all future fills and give the owner `execute`. Outside a fill only the owner
-    /// may call this. During a fill only this order itself may, through `execute`, so only the
-    /// handler can end the order mid-fill and the owner cannot close under it. Permissions this
-    /// account holds in other contracts are not revoked; the owner or the handler must do that.
+    /// @notice Stop all future fills. Owner execution is available once the current fill ends.
+    /// Outside a fill only the owner may call this. During a fill only this order itself may,
+    /// through execute, so only the handler can end the order mid-fill. The owner cannot close
+    /// under it. External permissions remain until the owner or handler revokes them.
     function close() external {
         if (msg.sender != (filling ? address(this) : owner())) revert Unauthorized();
         closed = true;
@@ -141,7 +147,7 @@ contract Order {
         if (address(this) == implementation) revert NotAnOrder();
     }
 
-    /// @dev 32 bytes of the arguments `Market` appended after the 45 byte ERC-1167 proxy code:
+    /// @dev Read 32 bytes of immutable arguments after the 45 byte ERC-1167 proxy code:
     /// owner (20 bytes), handler (20), handler code hash (32), config hash (32). In a clone,
     /// `address()` is the clone, so this reads the clone's own code.
     function _arg(uint256 offset) private view returns (bytes32 word) {

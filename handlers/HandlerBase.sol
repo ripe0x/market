@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IOrderHandler, Order} from "../src/Order.sol";
 
-/// @notice Helpers for handlers. Every effect goes through the order that called the handler,
-/// so other contracts see that order, never the handler, as the actor.
+/// @notice Helpers for making calls through the calling Order during its fill. Derived
+/// handlers authenticate their context and may also use authority granted directly to them.
 abstract contract HandlerBase is IOrderHandler {
     error UnexpectedETH();
 

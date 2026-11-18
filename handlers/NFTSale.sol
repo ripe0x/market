@@ -14,14 +14,16 @@ import {NFTTrade} from "./NFTTrade.sol";
 /// Fill input: `abi.encode(address recipient, uint256 maxPrice)`. The buyer sends at least the
 /// current price as ETH, and at most `maxPrice` is charged, so a quote that changes before the
 /// transaction lands cannot cost more than the buyer accepted. ETH sent above the price returns
-/// to the caller. `recipient` receives the token through `transferFrom`, without a callback.
+/// to the caller. `transferFrom` does not require the ERC721 receiver hook; an arbitrary
+/// collection may still make external calls.
 ///
 /// Seller's limits: the schedule, and `maxRoyaltyBps`. If the collection's royalty is more than
 /// that share of the price, the fill reverts instead of paying the seller less than agreed.
 /// Proceeds, `price - fee - royalty`, go to `proceedsTo`.
 ///
-/// To cancel, the owner calls `Order.close` and then takes the token and any ETH back through
-/// `Order.execute`. The order holds no allowance, so closing revokes nothing.
+/// To cancel, the owner calls Order.close, then uses Order.execute for recovery subject to
+/// the asset's transfer rules. An expired canonical right cannot be transferred back. Closing
+/// the listing does not terminate the right or grant authority over its backing account.
 contract NFTSale is NFTTrade {
     struct Config {
         IERC721 nft;
@@ -43,7 +45,7 @@ contract NFTSale is NFTTrade {
         external
         returns (bytes memory)
     {
-        // Without this, any contract could make this handler announce a sale that never settled.
+        // Authenticate fill context before using the order's authority or reporting settlement.
         _requireFill();
         Config memory c = abi.decode(config, (Config));
         (address recipient, uint256 maxPrice) = abi.decode(input, (address, uint256));
@@ -67,8 +69,9 @@ contract NFTSale is NFTTrade {
         _exec(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (from, to, tokenId)));
     }
 
-    /// @notice What a fill would cost now and where the money would go; reverts when a fill
-    /// would, except for the buyer's own limits and whether the order still holds the token.
+    /// @notice Calculate the current price and split, checking the schedule, nonzero proceeds
+    /// address, canonical right liveness and royalty limit. Does not authenticate the order or
+    /// config, check closure or custody, enforce buyer limits, or prove transfers will succeed.
     function quote(address order, Config memory c)
         public
         view

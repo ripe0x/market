@@ -15,8 +15,9 @@ import {Rights} from "../src/Rights.sol";
 ///
 /// Money terms, the same in both handlers:
 /// - `price` is everything the buyer spends. Nothing is added on top.
-/// - `fee` is the order's rate in `fees` (at most 1%, fixed when the order was created) of
-///   `price`, rounded down, paid out of `price` to the current `fees.recipient()`. A recipient
+/// - `fee` is `fees.feeBpsOf(order)` (at most 1%) of `price`, rounded down, paid out of
+///   `price` to the current `fees.recipient()`. Market-created orders retain their creation
+///   rate; compatible foreign clones use the latest scheduled rate. A recipient
 ///   that refuses ETH makes fills revert until the fee admin replaces it.
 /// - `royalty` is what the collection's ERC2981 `royaltyInfo(tokenId, price)` asks, capped at
 ///   `price - fee`, paid out of `price`. Collections that do not report ERC2981 through ERC165
@@ -25,7 +26,8 @@ import {Rights} from "../src/Rights.sol";
 /// - `proceeds = price - fee - royalty` goes to the seller.
 ///
 /// Both handlers act only inside a genuine fill (`_requireFill`), so their `Sold` and `Bought`
-/// events always describe a settlement that happened.
+/// events describe completed handler settlement. Delivery checks rely on the collection's
+/// ownerOf response, and external calls may still affect assets after settlement.
 abstract contract NFTTrade is HandlerBase {
     /// @notice A price that moves linearly from `startPrice` at `startTime` to `endPrice` at
     /// `endTime` and then stays at `endPrice`. Equal prices give a fixed price; a lower
@@ -139,9 +141,9 @@ abstract contract NFTTrade is HandlerBase {
         if (royalty != 0 && receiver == address(0)) revert BadRoyalty(receiver, royalty, price);
     }
 
-    /// @dev Moves `tokenId` from `from` to `to` with `transferFrom` (see `_transfer`), which
-    /// gives `to` no callback; whoever picks `to` must make sure it can handle ERC721s. Delivery
-    /// is judged by `ownerOf`, so it is only as honest as the collection.
+    /// @dev Moves `tokenId` with `transferFrom`, which does not require the ERC721 receiver
+    /// hook. An arbitrary collection may still make external calls. The recipient must be able
+    /// to hold the token; delivery checks trust the collection's ownerOf response.
     function _deliver(IERC721 nft, address from, address to, uint256 tokenId) internal {
         if (to == address(0)) revert ZeroAddress();
         if (nft.ownerOf(tokenId) == to) revert NotDelivered();
