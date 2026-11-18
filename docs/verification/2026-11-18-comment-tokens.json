@@ -1,0 +1,70 @@
+{
+  "base": "9d7f43dda544149f93db65fe3570031bc32365c5",
+  "files": [
+    {
+      "file": "examples/Artwork.sol",
+      "executableTokensIdentical": true,
+      "sha256": "cf6aadbe8c39981370f69a9ab0c68fbdad8067c2f3f81b9327e4d756154c8215"
+    },
+    {
+      "file": "examples/PaintAction.sol",
+      "executableTokensIdentical": true,
+      "sha256": "0cc7adffe15b459519e91f4fbe345832fd2465afe83bbf4c624485515400f59b"
+    },
+    {
+      "file": "handlers/CoveredNFTPurchase.sol",
+      "executableTokensIdentical": true,
+      "sha256": "c068c1ed04f8f3b8a27d22a2add201ef8b7821854b3878e933393d47ce200ab4"
+    },
+    {
+      "file": "handlers/FeeConfig.sol",
+      "executableTokensIdentical": true,
+      "sha256": "800363552d24f8ad447210e2dbeddb141906b3ecee6cd1c74077fe6dd2dbaffc"
+    },
+    {
+      "file": "handlers/HandlerBase.sol",
+      "executableTokensIdentical": true,
+      "sha256": "e0020ac66d300322925d0e3206b80101e535c59209ad013ca696f2370f2b3f5b"
+    },
+    {
+      "file": "handlers/NFTBid.sol",
+      "executableTokensIdentical": true,
+      "sha256": "040effc98cbf8007bcdd3a79eaa3ed00fe29dc7294e48d223090bcbe1f18a2dd"
+    },
+    {
+      "file": "handlers/NFTSale.sol",
+      "executableTokensIdentical": true,
+      "sha256": "7554c2d124ec23e1fedf5c15d15c432cad62818c79d5e718444f385029d33b33"
+    },
+    {
+      "file": "handlers/NFTTrade.sol",
+      "executableTokensIdentical": true,
+      "sha256": "c0a8e6cc99731ba90448b2c007f64eaee69dfc691a2b792c9e959c246ca91913"
+    },
+    {
+      "file": "periphery/FillVerifier.sol",
+      "executableTokensIdentical": true,
+      "sha256": "588183ec9fd540f74a9c109b2eae41621ab98265389a227ea7572a3c782b1fcc"
+    },
+    {
+      "file": "src/Market.sol",
+      "executableTokensIdentical": true,
+      "sha256": "1d54aa97970e796f173ad9c03661b46e20bcae8100d9ad81765798b810d7631e"
+    },
+    {
+      "file": "src/Order.sol",
+      "executableTokensIdentical": true,
+      "sha256": "57457a8a3973a6e8190f6b1284a3d27ca69fe2b5b7982b539383387736e1dc17"
+    },
+    {
+      "file": "src/Right.sol",
+      "executableTokensIdentical": true,
+      "sha256": "2acc1f83211660174dd399584a4530846cf288b48774289f34b952bd4816a550"
+    },
+    {
+      "file": "src/Rights.sol",
+      "executableTokensIdentical": true,
+      "sha256": "1245604a9f099ca931d1738075abfbc07f3f7b486b60a6aab93b636a7b2e7884"
+    }
+  ]
+}

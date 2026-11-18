@@ -1,5 +1,13 @@
 # Status
 
+## Focused contract and client improvements, 2026-11-18
+
+Production source is frozen at `cf7f48d8fae716740c59f882dcc2761497c2a63b`: functional `9d7f43d` authenticates Artwork against its immutable configured Market and removes redundant mint history; separate `cf7f48d` changes only production comments. The client pins that source and regenerates ABIs and candidate manifests after both changes. This supersedes the preceding metadata candidate identity, not historical public deployments.
+
+Fresh local suite: 245 passed. Order and rights deep invariant campaigns: each 1,000 runs × 128 calls with fail-on-revert true, zero driver reverts; the deterministic multi-lifecycle scenario passes. Focused regressions: 54 passed. Read-only forks: 14 NFT, 2 covered and 7 Sepolia tests passed, with the historical FillVerifier hash assertion repaired for intentional source metadata changes. Covered activation saves 22,415 isolated gas (232,109 → 209,694). Runtime/initcode Rights 7,951/8,838 bytes.
+
+The signed client rehearsal records 56 local transactions, including a genuinely reverted atomic issuance and both expiry cleanup paths, with exact premium, exercise credit and payout reconciliation. New computed Market is `0x5796242872BCAA3Fb0e16a4388c70f2e80aB966c`; **no rights-enabled public deployment exists or is authorized**. Detailed commands, retained initial failures, code hashes, economic scorecard and limits are in [the verification record](verification/2026-11-18-improvements.md). Remaining client browser verification is tracked in the client status.
+
 ## Covered nft client milestone, 2026-11-17
 
 The transferable-rights implementation was merged to `main` at `f70294aa45a435f20a0c8bb9721bd698fc0a4423` (PR #16). The `codex/covered-rights-client` branch adds canonical onchain metadata at source `91b22d39b58e35285eede0120a65ef4e6392959f` (D412–D413); the client began at `b4ee89ed591265964413fec58bc2dd1aca658b68` and records its exact final protocol pin in the client deployment manifests. The 2026-11-16 Sepolia order-only deployment remains a separate verified legacy release. **No rights-enabled public deployment or broadcast is authorized or recorded.**

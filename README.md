@@ -185,3 +185,5 @@ docs/       HANDLERS, SPEC, NFT_TRADING, DEPLOYMENT, SECURITY, DECISIONS, STATUS
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+The focused 2026-11-18 revision binds `Artwork` to its constructor-supplied Market and removes the `Rights.everMinted` getter. Config and lifecycle history remain in canonical events and accounts. Premiums and exercise payments remain separate: a zero strike can pay no underlying royalty and a zero premium pays no premium trading fee. See [current verification](docs/verification/2026-11-18-improvements.md) for the source pin, generated candidate identities, gas measurements and local signed rehearsal.

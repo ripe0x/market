@@ -282,3 +282,9 @@ Settlement ran after both schedules ended: ask 0.001 ETH, bid 0.006 ETH per toke
 | Bid order | −0.012 | Two fills; empty and closed |
 
 The four gains sum to 0.012 ETH. Tokens 1 and 2 belong to the bidder, token 3 to the holder; both orders are closed. After cleanup: holder's approval to `NFTBid` false, all balances 0. The same flows and attacks pass against forked Sepolia state in `test/fork/SepoliaLive.t.sol` (block 12,107,304, 6 tests).
+
+## Focused improvement candidate, 2026-11-18
+
+The compiled production source is `cf7f48d8fae716740c59f882dcc2761497c2a63b`. The client submodule pins this exact source; later protocol tests/documentation do not alter its bytecode. Comments changed Solidity metadata and deterministic addresses. The prior rights candidate is superseded and remains undeployed. New Market candidate: `0x5796242872BCAA3Fb0e16a4388c70f2e80aB966c`. The full computed address/hash table is in [the verification record](verification/2026-11-18-improvements.md); the client machine-readable rights manifests carry this source pin and separate local/candidate status. Sepolia candidate startBlock remains null.
+
+Use the existing same-signer Deploy.s.sol simulation, verification and postflight relationship runbook above with this final pin. Preserve the legacy deployment and its indexer schema. The updated local signed rehearsal uses the same deployment path and records 56 transactions, both listing/right expiry cases, actual payment release and manual-config recovery after burn. Public deployment, hosted indexer setup, cutover and real-asset transactions require separate authorization.

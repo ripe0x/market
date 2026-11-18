@@ -43,7 +43,7 @@ The fee terms live in a shared [`FeeConfig`](../handlers/FeeConfig.sol) that bot
 
 The admin alone can:
 
-1. `setFee(uint16 bps)`: change the rate for orders created from the next second on; reverts above `MAX_FEE_BPS`. Each order pays the rate in force when `Market` created it (`feeBpsOf(order)`, dated by `Market.createdAt`); an order that `Market` did not create (a hand-made clone) pays the latest rate. `feeBps()` is the rate new orders would get.
+1. `setFee(uint16 bps)`: change the rate for orders created from the next second on; reverts above `MAX_FEE_BPS`. Each order pays the rate in force when `Market` created it (`feeBpsOf(order)`, dated by `Market.createdAt`); an order that `Market` did not create (a hand-made clone) pays the latest rate. `feeBps()` returns the latest scheduled rate, including one not yet effective for newly created orders. Use `feeBpsOf(order)` for a particular order. Funding an order later does not reset its creation timestamp; an order created during a low-rate period retains that rate when funded later.
 2. `setRecipient(address)`: change where every later fee goes, at once, including fees from orders created earlier.
 3. `setAdmin(address)`: offer the admin role to an account, which takes it with `acceptAdmin()`. Until then nothing changes, and a new offer (or `address(0)`) replaces it.
 
@@ -212,3 +212,9 @@ What the numbers mean:
 4. **Escrow tradeoff.** A listed NFT is in its order, not the seller's wallet. Other marketplaces will not show it as the seller's, and it cannot be listed elsewhere at the same time.
 
 These measurements do not cover Seaport's criteria or partial fills, Blur, or aggregated multi-order fills.
+
+## Pricing helpers and split consideration
+
+Sale and bid quotes check their price schedules, relevant token eligibility and royalty/fee inputs. They do not prove that the order is open, has backing, has sufficient approvals, or that delivery and recipient callbacks will succeed. A closed order can still return a price while its fill reverts. Authenticate the order and simulate the actual fill before signing.
+
+Right premiums pay the supported trading fee and no underlying nft royalty. Covered exercise uses its fixed payment and activation royalty, with no trading fee. With a 1% trading rate and 5% underlying royalty, a 1 eth premium and zero exercise payment pays 0.01 eth fee, 0.99 eth listing proceeds and zero underlying royalty. A one wei exercise payment also rounds its 5% royalty to zero. With a zero premium and 1 eth exercise payment, premium fees are zero and exercise credits are 0.95 eth proceeds plus 0.05 eth royalty. These allocations are permitted. Issuer-only covered residual recovery prevents buyer surrender from releasing the collateral to that buyer; it does not impose a royalty on total economic consideration.

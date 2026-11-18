@@ -150,3 +150,15 @@ Decided by the owner on 2026-11-16, on the recommendations in the session record
 6. **Closed 2026-11-10 (D301).** `AcquisitionBid` and `TokenExchange` were removed. The core does not restrict an owner's `execute` after closing (D205); handlers must not pull a filler's assets under an approval to the order.
 7. **Resolved 2026-11-16: holders choose how to approve `NFTBid`.** Both `approve(nftBid, tokenId)` (one token, tested in `test/Compose.t.sol`) and `setApprovalForAll(nftBid, true)` (every token, tested in `test/NFTBid.t.sol`) work, because the handler moves tokens with `transferFrom`. The documentation recommends one token at a time and revoking afterwards; approval for all is accepted for the experimental release with the exposure in residual risk 5. The independent audit should focus on `NFTBid`.
 8. **Resolved 2026-11-16: `NFTSale` keeps fill authentication (D302)**, about 2,500 gas per sale fill, so its `Sold` events cannot be forged.
+
+## D414: configured artwork registry and token existence, 2026-11-18
+
+Approved owner follow-up: Artwork takes its intended Market in the constructor and authenticates reservation candidates against that immutable registry before getters. No issuer/owner equality or handler allowlist is added. Reservation liveness during exercise remains distinct from transferable right liveness.
+
+Remove Rights.everMinted and its getter without replacement history storage. Canonical account/caller authentication, one-time activation, terminal permanence and ERC721 existence checks retain the mint/burn boundary.
+
+## D415: explicit split consideration and client recovery, 2026-11-18
+
+Approved policy remains premium trading fees plus committed exercise royalties, with no minimum strike, exercise trading fee or premium royalty. Zero and one wei exercise prices can pay zero royalty; zero premium pays no trading fee. feeBps is the latest scheduled rate; feeBpsOf resolves a particular order, including its creation timestamp before later funding. Quotes are pricing helpers, not fill guarantees.
+
+Client listing expiry and right expiry are independent. Stale associations remain inspectable. An expired/burned entitlement cannot be returned from escrow; close the listing separately and use authorized right termination/recovery. Original encoded config can restore terminal covered collateral recovery during discovery outages only after exact-byte hash, deployment, canonical account, supported handler, lifecycle, residual authority and backing checks. Activation policy must not override terminal core residual authority.
