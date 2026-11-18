@@ -1,6 +1,6 @@
 # Focused improvements verification, 2026-11-18
 
-Compiled production source: `cf7f48d8fae716740c59f882dcc2761497c2a63b`. Functional commit `9d7f43dda544149f93db65fe3570031bc32365c5` and separate comment-only commit `cf7f48d8fae716740c59f882dcc2761497c2a63b`. All 13 comment-only Solidity diffs have identical executable tokens; see the adjacent JSON. Later tests/documentation do not change compiled production source.
+Production files finalized at `cf7f48d8fae716740c59f882dcc2761497c2a63b`. Final complete protocol pin and regenerated artifact source: `c211808cf3dd6ed36f41e92d885e6f866a4b9436`, including the historical fork-test repair. A source comparison confirms no production/script changes between these revisions; regenerated addresses, runtime hashes and relationships are identical. Functional commit `9d7f43dda544149f93db65fe3570031bc32365c5` and separate comment-only commit `cf7f48d8fae716740c59f882dcc2761497c2a63b`. All 13 comment-only Solidity diffs have identical executable tokens; see the adjacent JSON. Later documentation commits do not change the compiled production files.
 
 ## Computed identities
 
@@ -45,7 +45,7 @@ These owner-approved allocations deliberately do not enforce a charge on total e
 
 ## Signed local evidence
 
-Client `packages/protocol/evidence/rights-local.json` records 56 actual signed local transactions: 55 successes and one deliberately reverted atomic issuance, total gas 13,178,598. Nonzero gas prices are recorded per receipt. It reconciles 0.2/0.3 eth premiums (0.198/0.297 seller, 0.005 total fee), 1 eth exact exercise (0.95/0.05 credit and actual beneficiary receipts), unchanged backing through resales, burn, listing expiry/live return, right expiry/close-only/finalization, manual-config collateral recovery after burn, pending cancellation and genuine account atomic rollback. The supplied config prevents historical lookup during manual recovery; browser tests separately exercise failed discovery services. No public transaction occurred.
+Client `packages/protocol/evidence/rights-local.json` records 56 actual signed local transactions: 55 successes and one deliberately reverted atomic issuance, total gas 13,178,694. Nonzero gas prices are recorded per receipt. It reconciles 0.2/0.3 eth premiums (0.198/0.297 seller, 0.005 total fee), 1 eth exact exercise (0.95/0.05 credit and actual beneficiary receipts), unchanged backing through resales, burn, listing expiry/live return, right expiry/close-only/finalization, manual-config collateral recovery after burn, pending cancellation and genuine account atomic rollback. The supplied config prevents historical lookup during manual recovery; browser tests separately exercise failed discovery services. No public transaction occurred.
 
 ## Read-only public identity
 

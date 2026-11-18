@@ -2,7 +2,7 @@
 
 ## Focused contract and client improvements, 2026-11-18
 
-Production source is frozen at `cf7f48d8fae716740c59f882dcc2761497c2a63b`: functional `9d7f43d` authenticates Artwork against its immutable configured Market and removes redundant mint history; separate `cf7f48d` changes only production comments. The client pins that source and regenerates ABIs and candidate manifests after both changes. This supersedes the preceding metadata candidate identity, not historical public deployments.
+Production source is frozen at `cf7f48d8fae716740c59f882dcc2761497c2a63b`: functional `9d7f43d` authenticates Artwork against its immutable configured Market and removes redundant mint history; separate `cf7f48d` changes only production comments. The client pins complete revision `c211808cf3dd6ed36f41e92d885e6f866a4b9436`, including the fork-test repair, and regenerates ABIs and candidate manifests. The production files are unchanged from cf7f48d. This supersedes the preceding metadata candidate identity, not historical public deployments.
 
 Fresh local suite: 245 passed. Order and rights deep invariant campaigns: each 1,000 runs × 128 calls with fail-on-revert true, zero driver reverts; the deterministic multi-lifecycle scenario passes. Focused regressions: 54 passed. Read-only forks: 14 NFT, 2 covered and 7 Sepolia tests passed, with the historical FillVerifier hash assertion repaired for intentional source metadata changes. Covered activation saves 22,415 isolated gas (232,109 → 209,694). Runtime/initcode Rights 7,951/8,838 bytes.
 
