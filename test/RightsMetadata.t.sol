@@ -11,6 +11,22 @@ import {Rights} from "../src/Rights.sol";
 import {CoveredNFTPurchase} from "../handlers/CoveredNFTPurchase.sol";
 import {RoyaltyNFT} from "./utils/Mocks.sol";
 
+contract MetadataCallbackNFT is RoyaltyNFT {
+    Rights public rights;
+    uint256 public rightId;
+    string public observed;
+
+    function arm(Rights collection, uint256 id) external {
+        rights = collection;
+        rightId = id;
+    }
+
+    function transferFrom(address from, address to, uint256 id) public override {
+        super.transferFrom(from, to, id);
+        if (address(rights) != address(0)) observed = rights.tokenURI(rightId);
+    }
+}
+
 contract RightsMetadataTest is Test {
     Market market;
     Rights rights;
@@ -47,7 +63,10 @@ contract RightsMetadataTest is Test {
     }
 
     function _json(uint256 id) private view returns (string memory) {
-        string memory uri = rights.tokenURI(id);
+        return _decode(rights.tokenURI(id));
+    }
+
+    function _decode(string memory uri) private pure returns (string memory) {
         bytes memory full = bytes(uri);
         bytes memory prefix = bytes("data:application/json;base64,");
         assertGt(full.length, prefix.length);
@@ -86,7 +105,7 @@ contract RightsMetadataTest is Test {
         assertEq(_string(json, ".activationTerms"), Strings.toHexString(abi.encode(royalty, 0.05 ether)));
         assertEq(_string(json, ".residualBeneficiary"), Strings.toHexString(issuer));
         assertEq(_string(json, ".deadlinePolicy"), "finite-exclusive");
-        assertEq(vm.parseJsonUint(json, ".deadline"), deadline);
+        assertEq(vm.parseJsonString(json, ".deadline"), Strings.toString(deadline));
         assertEq(_string(json, ".state"), "active");
         assertEq(_string(json, ".effectiveStatus"), "active");
         assertTrue(_bool(json, ".live"));
@@ -108,7 +127,7 @@ contract RightsMetadataTest is Test {
         uint256 id = right.tokenId();
         string memory json = _json(id);
         assertEq(_string(json, ".deadlinePolicy"), "perpetual");
-        assertEq(vm.parseJsonUint(json, ".deadline"), 0);
+        assertEq(vm.parseJsonString(json, ".deadline"), "0");
         vm.warp(365 days * 100);
         assertTrue(_bool(_json(id), ".live"));
 
@@ -124,6 +143,29 @@ contract RightsMetadataTest is Test {
         assertEq(nft.ownerOf(nextId), buyer);
         vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721NonexistentToken.selector, id));
         rights.tokenURI(id);
+    }
+
+    function test_uint256DeadlineIsExactAndCallbackShowsExecutionLock() public {
+        uint256 deadline = 9_007_199_254_740_993;
+        MetadataCallbackNFT target = new MetadataCallbackNFT();
+        target.mint(issuer, 1);
+        bytes memory config = abi.encode(CoveredNFTPurchase.Config(target, 1, 1 ether, issuer, 0));
+        vm.prank(issuer);
+        Right account = market.createRight(purchase, config, deadline, issuer, bytes32(uint256(99)));
+        vm.prank(issuer);
+        target.transferFrom(issuer, address(account), 1);
+        vm.prank(issuer);
+        account.activate(config);
+        uint256 id = account.tokenId();
+        assertEq(vm.parseJsonString(_json(id), ".deadline"), "9007199254740993");
+        target.arm(rights, id);
+        vm.prank(issuer);
+        rights.transferFrom(issuer, buyer, id);
+        vm.prank(buyer);
+        account.exercise{value: 1 ether}(config, abi.encode(buyer));
+        string memory observed = _decode(target.observed());
+        assertEq(vm.parseJsonString(observed, ".effectiveStatus"), "executing");
+        assertFalse(vm.parseJsonBool(observed, ".live"));
     }
 }
 
