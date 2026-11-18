@@ -47,6 +47,10 @@ These owner-approved allocations deliberately do not enforce a charge on total e
 
 Client `packages/protocol/evidence/rights-local.json` records 56 actual signed local transactions: 55 successes and one deliberately reverted atomic issuance, total gas 13,178,598. Nonzero gas prices are recorded per receipt. It reconciles 0.2/0.3 eth premiums (0.198/0.297 seller, 0.005 total fee), 1 eth exact exercise (0.95/0.05 credit and actual beneficiary receipts), unchanged backing through resales, burn, listing expiry/live return, right expiry/close-only/finalization, manual-config collateral recovery after burn, pending cancellation and genuine account atomic rollback. The supplied config prevents historical lookup during manual recovery; browser tests separately exercise failed discovery services. No public transaction occurred.
 
+## Read-only public identity
+
+Tenderly Sepolia read at block 12,163,460: legacy deployment runtime and relationship verification returned no mismatches. The new Market candidate returned no code; candidate status/startBlock remain candidate/null. This was read-only and did not inspect or authorize any signer.
+
 ## Limits
 
 Local test and AI source-review evidence is bounded, not an independent audit. Real wallet extension behavior, public deployment, public walkthrough, production indexer migration/cutover, transaction inclusion timing and current public gas-market behavior remain unverified and unauthorized here. A refusing beneficiary that cannot authorize redirection still has an uncollectible reserved credit; someone must pay gas for releases and expiry finalization.
