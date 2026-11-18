@@ -1,5 +1,10 @@
 # Status
 
+## Covered nft client milestone, 2026-11-17
+
+Baseline `main` is `f70294aa45a435f20a0c8bb9721bd698fc0a4423` (PR #16 merged). The next feature branch is `codex/covered-rights-client`; it adds generic onchain ERC721 metadata (D412). The client starts at `b4ee89ed591265964413fec58bc2dd1aca658b68`, with its verified legacy Sepolia deployment preserved separately. No rights-enabled public deployment is authorized. Metadata focused tests passed (finite exclusive expiry before finalization, perpetual transfer/exercise, absent token URI, direct deployment gas). Final candidate manifests and actual local RPC walkthrough will be recorded after the pinned client integration.
+
+
 Updated 2026-11-17. Transferable-rights candidate on `codex/transferable-rights`, based on `79120eb`. The candidate is published as PR #16 and remains unmerged; no redesigned contract has been broadcast. Earlier Sepolia records below remain historical evidence for the order-only release.
 
 ## Transferable-rights candidate

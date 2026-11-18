@@ -193,6 +193,8 @@ The reference covered NFT purchase handler checks issuer-only residual and `owne
 
 `NFTSale` may escrow and resell a live right token without moving its backing. Its seller owns only that listing; `Order.close` cancels the listing and permits token recovery, leaving the right untouched. A live listing's order is the token's actual holder. `NFTBid` accepts only a specific token ID for the canonical rights collection; collection-wide bids are rejected. Normal NFT sale fee and royalty rules still govern the premium, but the rights collection advertises no ERC2981 royalty. The underlying NFT's committed royalty applies once to its exercise payment, not every premium resale. Trading order deadlines are separate from the immutable right deadline and should leave an exercise window.
 
+`Rights.tokenURI(id)` returns Base64 JSON for an existing ownership token, with account identity, issuer, handler/code hash, config hash, activation terms, deadline policy, residual and effective liveness. Pending and burned tokens have no URI. At an exclusive deadline the token may still exist but the metadata reports expired and not live. It never calls the handler or underlying target.
+
 ## Toolchain
 
 Solidity 0.8.30, EVM version Prague, optimizer 200 runs with via-IR (`foundry.toml`). The core uses transient storage (EIP-1153), so it needs Cancun or later; it also compiles with Solidity 0.8.28. Clone creation and address prediction use OpenZeppelin Contracts v5.7.0 `Clones`.

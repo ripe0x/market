@@ -56,6 +56,8 @@ order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(ord
 
 `Market.orderAddress(owner, handler, keccak256(config), salt)` gives the address before creation, so assets can be sent first.
 
+Canonical `Rights.tokenURI` is onchain JSON describing the backing account and generic commitment. It does not fetch a handler or nft URL. Handler-specific terms come from the authenticated `RightCreated` config and stored activation terms.
+
 ## Issue, trade and exercise a right
 
 1. The issuer calls `Market.createRight(handler, config, deadline, residual, salt)`. The new account is **pending** and has no token. The issuer deposits the NFT or arranges a target-enforced reservation from outside that account.
