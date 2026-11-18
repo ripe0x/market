@@ -14,6 +14,20 @@ The new `Market` creates an `Order` implementation, a `Right` implementation and
 
 `Market.rights()` and `Market.rightImplementation()` identify the canonical token and backing implementation. `Market.rightAddress(issuer, handler, configHash, deadline, residual, salt)` predicts an individual backing account; verify `Market.isRight(account)` before relying on it. `Rights.accountOf(tokenId)` authenticates a Market-created account. Each right publishes its config in `RightCreated`; its activation terms, deadline, state and residual beneficiary can be read from the account.
 
+The frozen metadata bytecode has these **computed, undeployed** candidate addresses. The client manifest records the exact source pin, runtime hashes and relationships. A documentation-only commit does not change these addresses.
+
+| Contract | Computed candidate |
+| --- | --- |
+| market | `0x2EEd41b789fC4D812fB7d2b19a40FF21851Ada95` |
+| orderImplementation | `0x5c6faF50236c460849314c302198Ed382E65f6Ee` |
+| rightImplementation | `0x038E2C2b4448021525dd3EB0e3385b447e43e4e5` |
+| rights | `0x7d3AB35412fF49921A60eAf921a1f6A3c5F83b5b` |
+| feeConfig | `0xa4c8dC554170d3016aeC36441F5F465BbAb816B0` |
+| nftSale | `0x60C4c83bB2EAdd73D2669dC180587FB4e4a9393C` |
+| nftBid | `0xea19021Fd9d418874e146C1dA167C234D08f33f4` |
+| coveredNFTPurchase | `0xe9f8bf0e002Ef25dCa9c5490186191aB93E2184c` |
+| fillVerifier | `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` |
+
 ### Rights candidate: Sepolia preparation and release gate
 
 The metadata implementation was frozen at `91b22d3`. The client pins the final protocol revision in `contracts/market` and records its exact commit, resulting addresses and runtime hashes in `deployments/rights-sepolia.json`. That manifest is a **candidate** with `startBlock: null`; its addresses are calculations, not a claim that code exists on Sepolia. `deployments/legacy-sepolia.json` remains the verified order-only production release at block 12,150,229. The client defaults to legacy on public Sepolia; selecting `rights-v1` does not make the candidate live. Regenerate the rights manifests only from the frozen source and inspect the diff; generation starts a private Anvil, not a public transaction.
