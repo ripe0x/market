@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {Market} from "../src/Market.sol";
 import {Right} from "../src/Right.sol";
 
 /// @title Artwork
@@ -16,6 +17,7 @@ contract Artwork is ERC721 {
     }
 
     address public immutable artist;
+    Market public immutable market;
     mapping(uint256 tokenId => uint8) public colorOf;
     mapping(uint256 tokenId => address) public painterOf;
     mapping(uint256 tokenId => Reservation) public reservation;
@@ -27,8 +29,9 @@ contract Artwork is ERC721 {
     error NotAllowed();
     error ReservationLive();
 
-    constructor() ERC721("Artwork", "ART") {
+    constructor(Market market_) ERC721("Artwork", "ART") {
         artist = msg.sender;
+        market = market_;
     }
 
     function mint(address to, uint256 tokenId) external {
@@ -60,7 +63,7 @@ contract Artwork is ERC721 {
         if (msg.sender != ownerOf(tokenId) || allowedColors == 0) revert NotAllowed();
         Reservation memory old = reservation[tokenId];
         if (_live(old.right)) revert ReservationLive();
-        if (!right.market().isRight(address(right)) || right.state() != Right.State.Pending) revert NotAllowed();
+        if (!market.isRight(address(right)) || right.state() != Right.State.Pending) revert NotAllowed();
         reservation[tokenId] = Reservation(address(right), allowedColors);
         emit Reserved(tokenId, address(right), allowedColors);
     }

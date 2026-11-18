@@ -16,7 +16,6 @@ contract Rights is ERC721 {
     using Strings for address;
 
     IRightsMarket public immutable market;
-    mapping(uint256 tokenId => bool) public everMinted;
 
     error NotBackingAccount();
     error InvalidTransfer();
@@ -75,16 +74,15 @@ contract Rights is ERC721 {
 
     function mint(address issuer, uint256 id) external {
         Right account = accountOf(id);
-        if (msg.sender != address(account) || account.state() != Right.State.Active || everMinted[id]) {
+        if (msg.sender != address(account) || account.state() != Right.State.Active) {
             revert NotBackingAccount();
         }
-        everMinted[id] = true;
         _mint(issuer, id);
     }
 
     function burn(uint256 id) external {
         Right account = accountOf(id);
-        if (msg.sender != address(account) || account.state() == Right.State.Active || !everMinted[id]) {
+        if (msg.sender != address(account) || account.state() == Right.State.Active) {
             revert NotBackingAccount();
         }
         _burn(id);

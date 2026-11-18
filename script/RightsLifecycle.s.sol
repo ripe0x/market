@@ -114,7 +114,7 @@ contract RightsLifecycle is Script {
     }
 
     function artworkExercise() internal {
-        Artwork art = new Artwork();
+        Artwork art = new Artwork(market);
         art.mint(ISSUER, 1);
         bytes memory config = abi.encode(ReservedPaint.Config(art, 1, uint256(1 << 2 | 1 << 3)));
         vm.prank(ISSUER);
