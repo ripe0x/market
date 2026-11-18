@@ -228,3 +228,11 @@ Independent AI review of the supported contracts at commit `69f2455` (a separate
 | I3 | Info | An `NFTBid` seller accepts the bidder's `recipient` from config, not input | By design; the seller is paid at least `minProceeds`. |
 
 Static analysis: Slither 0.11.5, 101 detectors, over `src/`, `handlers/`, `periphery/` and `examples/` compiled together (solc 0.8.30, via-IR). 21 results, none actionable; triage in STATUS.md.
+
+## 2026-11-18 focused changes
+
+Artwork reservation authentication uses the target's immutable configured Market registry before candidate getters. Self-selected registries and genuine accounts from a different Market are rejected. Runtime handler hashes commit to bytecode, not mutable handler storage or external dependencies.
+
+The removed `everMinted` storage is not replaced by another history flag. The account lifecycle permits activation once, terminal states remain permanent, and ERC721 rejects duplicate minting and absent burns. Terminal recovery must not remint.
+
+Premium/exercise splits can minimize royalty or trading-fee amounts as described in NFT_TRADING.md. This is the approved economic policy, not universal royalty enforcement. Closing an expired-right listing cannot return a nontransferable token; expiry finalization and issuer collateral recovery are separate.

@@ -74,10 +74,13 @@ contract Right {
         return IExerciseHandler(address(bytes20(_arg(20))));
     }
 
+    /// @notice Committed handler runtime bytecode hash, excluding mutable storage and external
+    /// dependencies. Activation and exercise require that bytecode hash to remain unchanged.
     function handlerCodehash() public view returns (bytes32) {
         return _arg(40);
     }
 
+    /// @notice Hash of the full configuration bytes published in Market.RightCreated.
     function configHash() public view returns (bytes32) {
         return _arg(72);
     }
@@ -95,6 +98,8 @@ contract Right {
         return uint256(uint160(address(this)));
     }
 
+    /// @notice Active, before the exclusive deadline and outside an ongoing exercise. Artwork
+    /// checks active state and deadline separately so an executing reservation remains usable.
     function isLive() public view returns (bool) {
         _requireRight();
         uint256 end = deadline();

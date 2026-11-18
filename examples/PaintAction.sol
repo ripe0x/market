@@ -7,7 +7,7 @@ import {HandlerBase} from "../handlers/HandlerBase.sol";
 /// @title PaintAction
 /// @notice A handler that is not about trading: it sells one change to an artwork. The buyer
 /// picks a color from the creator's allowed set and pays ETH to `payee`. The order must be the
-/// token's painter, a permission `Artwork` grants and Market knows nothing about. The fill
+/// token's painter, a revocable permission granted by Artwork independently of Market. The fill
 /// paints, resigns the painter role and closes the order, so the permission is used once.
 /// Input: the color.
 ///

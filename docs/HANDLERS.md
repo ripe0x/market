@@ -31,7 +31,7 @@ Who may make an order act:
 | While active, nothing leaves the order except through its handler during a fill | Whether the handler takes only from `caller`, builds its own calls and keys state by order |
 | Nobody, including the owner, can act as an active order outside a fill | Whether the price, limits and expiry are what you think they are |
 | A fill is atomic and cannot reenter the same order | Whether nested fills of other orders on the same handler stay apart |
-| After `close`, no more fills, and the owner can recover everything | Whether a single-use order closes itself after use |
+| After `close`, no more fills; owner recovery remains subject to asset transfer rules | Whether a single-use order closes itself after use |
 | Each order's assets and approvals are usable by no other order | Whether external contracts the handler reads (prices, NFTs, royalty receivers) behave |
 | Market takes no fee, has no owner and no registry | Any fee, split or royalty |
 
@@ -206,3 +206,7 @@ Supported examples: [`CoveredNFTPurchase`](../handlers/CoveredNFTPurchase.sol) f
 4. **Check your receipt atomically if you do not trust the handler.** From a contract or a batching wallet (EIP-5792, EIP-7702), snapshot what you expect to receive, fill, and require the increase in the same transaction with [`periphery/FillVerifier.sol`](../periphery/FillVerifier.sol). If the check fails, the fill and its payment revert.
 5. **Never approve someone else's order.** Approve a handler only if you have read it and it authenticates orders as `NFTBid` does.
 6. **Do not send ETH or tokens to an order or a handler** except as the handler documents.
+
+Quotes are pricing helpers, not complete fill simulations. They do not establish order openness, custody, all approvals or callback success. A handler retains its execution authority until the current fill finishes even if it closes the order mid-fill. `NFTBid` uses approvals granted directly to its shared handler by the authenticated filler; those approvals are distinct from authority held by an order.
+
+`Artwork` constructor callers must supply the intended immutable Market. Reservation candidates are checked against this configured registry before any candidate getters. Do not replace its active/unexpired reservation check with `Right.isLive()`: the latter is false during an exercise, while the reservation must still be consumable then.

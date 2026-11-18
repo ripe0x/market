@@ -278,12 +278,10 @@ contract FeeTest is Base {
         vm.prank(feeAdmin);
         fees.setFee(100);
         Order order = Order(
-            payable(
-                Clones.cloneWithImmutableArgs(
+            payable(Clones.cloneWithImmutableArgs(
                     market.implementation(),
                     abi.encodePacked(seller, address(sale), address(sale).codehash, keccak256(config))
-                )
-            )
+                ))
         );
         assertEq(market.createdAt(order), 0);
         assertEq(fees.feeBpsOf(address(order)), 100);
@@ -375,6 +373,51 @@ contract FeeTest is Base {
 
     function _bidConfig(uint256 price) internal view returns (bytes memory) {
         return abi.encode(NFTBid.Config(art, true, 0, _fixed(price), vault, 5));
+    }
+
+    function test_latestScheduledGetterBeforeEffectiveBoundary() public {
+        (Order order,) = _listArtId(42, 1 ether);
+        vm.prank(feeAdmin);
+        fees.setFee(0);
+        assertEq(fees.feeBps(), 0, "latest scheduled rate immediately");
+        assertEq(fees.feeBpsOf(address(order)), 100, "creation rate remains applicable");
+        (Order sameSecond,) = _listArtId(43, 1 ether);
+        assertEq(fees.feeBpsOf(address(sameSecond)), 100);
+        skip(1);
+        (Order nextSecond,) = _listArtId(44, 1 ether);
+        assertEq(fees.feeBpsOf(address(nextSecond)), 0);
+    }
+
+    function test_delayedBidFundingRetainsLowCreationFee() public {
+        vm.prank(feeAdmin);
+        fees.setFee(0);
+        skip(1);
+        bytes memory config = _bidConfig(1 ether);
+        Order bid = _openBid(1 ether, 0);
+        vm.prank(feeAdmin);
+        fees.setFee(100);
+        skip(1);
+        vm.deal(seller, 1 ether);
+        vm.prank(seller);
+        (bool funded,) = address(bid).call{value: 1 ether}("");
+        assertTrue(funded);
+        vm.prank(holder);
+        bid.fill(config, abi.encode(1, 0, holder));
+        assertEq(treasury.balance, 0);
+        assertEq(royalty.balance, 0.05 ether);
+        assertEq(holder.balance, 0.95 ether);
+        assertEq(fees.feeBpsOf(address(bid)), 0);
+    }
+
+    function test_closedSaleQuoteStillReturnsWhileFillReverts() public {
+        (Order order, bytes memory config) = _listArtId(45, 1 ether);
+        vm.prank(seller);
+        order.close();
+        (uint256 price,,,,) = sale.quote(address(order), abi.decode(config, (NFTSale.Config)));
+        assertEq(price, 1 ether);
+        vm.prank(buyer);
+        vm.expectRevert();
+        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
     }
 
     function _openBid(uint256 price, uint256 funds) internal returns (Order bid) {

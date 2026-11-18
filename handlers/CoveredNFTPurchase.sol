@@ -8,8 +8,11 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Market} from "../src/Market.sol";
 import {IExerciseHandler, Right} from "../src/Right.sol";
 
-/// @notice One fully covered option to buy a particular NFT for a fixed ETH price. Resale
-/// premiums are separate NFT trades; this handler only allocates the exercise payment.
+/// @notice One collateralized right to buy a particular NFT for a fixed ETH exercise price.
+/// Premium trades use NFTSale or NFTBid and their trading fees. This handler allocates only
+/// the exercise payment with no trading fee. ERC2981 royalties are committed at activation
+/// from that exercise price, which may be zero, and do not apply to premiums. Surrender and
+/// expiry release collateral to the immutable issuer through Right.recover.
 contract CoveredNFTPurchase is IExerciseHandler {
     struct Config {
         IERC721 nft;

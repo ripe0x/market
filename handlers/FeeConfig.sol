@@ -10,7 +10,8 @@ import {Order} from "../src/Order.sol";
 ///
 /// - The rate is at most `MAX_FEE_BPS` (1%) and starts there. A change applies to orders
 ///   created from the next second on; every order keeps the rate in force when `Market` created
-///   it (`feeBpsOf`). An order `Market` did not create pays the latest rate.
+///   it (`feeBpsOf`), even if funded later. An order Market did not create pays the latest
+///   scheduled rate, including one whose effective timestamp has not yet arrived.
 /// - The recipient applies at once to every fill, including orders created earlier.
 /// - The admin can offer the role to another account, which takes it with `acceptAdmin`.
 ///   Nothing else is privileged.
@@ -91,7 +92,8 @@ contract FeeConfig {
         emit FeeSet(bps, since);
     }
 
-    /// @notice The rate new orders get.
+    /// @notice The latest scheduled rate, even before its effective timestamp. Use feeBpsOf
+    /// to resolve the rate applicable to an existing order.
     function feeBps() external view returns (uint256) {
         return rates[rates.length - 1].bps;
     }
@@ -102,7 +104,7 @@ contract FeeConfig {
     }
 
     /// @notice The fee rate of `order`: the rate in force when `Market` created it. An order
-    /// `Market` did not create (`createdAt` 0) pays the latest rate.
+    /// Market did not create (createdAt 0) pays the latest scheduled rate immediately.
     function feeBpsOf(address order) public view returns (uint256) {
         uint256 hi = rates.length - 1;
         if (hi == 0) return rates[0].bps;

@@ -2,22 +2,20 @@
 pragma solidity ^0.8.28;
 
 /// @title FillVerifier
-/// @notice Optional periphery for fillers who do not trust an order's handler. Market does not
-/// use it. An account that can make several calls atomically (a contract, an EIP-7702 or other
-/// smart wallet, an EIP-5792 atomic batch) checks the outcome of its own fill in the same
-/// transaction, so a fill that does not deliver reverts everything, payment and approvals
-/// included:
+/// @notice Outcome checks for calls made within one transaction. A calling account can take
+/// a snapshot, fill an order and check the resulting state. A failed check reverts its call;
+/// reverting the entire transaction requires that failure to propagate through the caller:
+/// payment and approvals are then rolled back with the fill.
 ///
 ///   1. `snapshot(nft, balanceOf(me))`
 ///   2. `order.fill(config, input)`, sent by the filler itself, as usual
 ///   3. `requireIncrease(nft, balanceOf(me), 1)`, or `requireEqual(nft, ownerOf(id), me)`
 ///
-/// It holds nothing, has no owner, needs no approvals and reads other contracts only with
+/// It has no custody functions or owner, needs no approvals and reads other contracts only with
 /// `staticcall`. Snapshots live in transient storage keyed by the caller, so only the account
 /// that took one can use it; each serves one `requireIncrease`, and all vanish when the
-/// transaction ends. It compares numbers and bytes; it cannot tell what a query means. Query
-/// the contract that records what you were promised (the token or NFT you are buying), never
-/// the order or its handler.
+/// transaction ends. Results depend on the queried contract's responses; these checks do not
+/// authenticate its code or establish the meaning of the returned data.
 contract FillVerifier {
     error QueryFailed();
     error NoSnapshot();

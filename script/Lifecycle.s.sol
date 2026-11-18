@@ -62,7 +62,9 @@ contract Lifecycle is Addresses {
         view
         returns (NFTTrade.Schedule memory)
     {
-        return NFTTrade.Schedule(startPrice, endPrice, block.timestamp, block.timestamp + duration, block.timestamp + 30 days);
+        return NFTTrade.Schedule(
+            startPrice, endPrice, block.timestamp, block.timestamp + duration, block.timestamp + 30 days
+        );
     }
 
     function fixedSale() internal {
@@ -85,9 +87,8 @@ contract Lifecycle is Addresses {
     }
 
     function persistentBid() internal {
-        bytes memory config = abi.encode(
-            NFTBid.Config(nft, true, 0, _schedule(0.002 ether, 0.004 ether, 1 days), VAULT, 3)
-        );
+        bytes memory config =
+            abi.encode(NFTBid.Config(nft, true, 0, _schedule(0.002 ether, 0.004 ether, 1 days), VAULT, 3));
         Order order = market().create{value: 0.004 ether}(nftBid(), config, bytes32(++salt));
         nft.setApprovalForAll(address(nftBid()), true);
         order.fill(config, abi.encode(3, 0, me));
@@ -110,7 +111,7 @@ contract Lifecycle is Addresses {
     }
 
     function paint() internal {
-        Artwork art = new Artwork();
+        Artwork art = new Artwork(market());
         art.mint(me, 1);
         bytes memory config = abi.encode(PaintAction.Config(art, 1, 0x0e, 0.001 ether, me)); // colors 1 to 3
         Order order = market().create(paintAction(), config, bytes32(++salt));

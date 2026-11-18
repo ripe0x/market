@@ -15,7 +15,7 @@ contract PaintActionTest is Base {
     function setUp() public override {
         super.setUp();
         vm.prank(artist);
-        art = new Artwork();
+        art = new Artwork(market);
         vm.prank(artist);
         art.mint(artist, ID);
     }

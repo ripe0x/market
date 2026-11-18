@@ -2,13 +2,14 @@
 pragma solidity ^0.8.28;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {Market} from "../src/Market.sol";
 import {Right} from "../src/Right.sol";
 
 /// @title Artwork
-/// @notice Example 3's artwork, independent of Market. Each token has a color. Its owner may
-/// paint it, and may name one painter who can paint it too. A painter can resign, and any
-/// transfer of the token removes its painter. A separately reserved one-use repaint survives
-/// transfer and can be consumed only through its live Market right.
+/// @notice Each token has a color. Its owner may paint it or assign a revocable painter.
+/// Transfer clears the painter. A one-use repaint reservation survives transfer and can be
+/// consumed during its right's exercise. The configured immutable Market authenticates a
+/// candidate reservation account before any account getters are called.
 contract Artwork is ERC721 {
     struct Reservation {
         address right;
@@ -16,6 +17,7 @@ contract Artwork is ERC721 {
     }
 
     address public immutable artist;
+    Market public immutable market;
     mapping(uint256 tokenId => uint8) public colorOf;
     mapping(uint256 tokenId => address) public painterOf;
     mapping(uint256 tokenId => Reservation) public reservation;
@@ -27,8 +29,9 @@ contract Artwork is ERC721 {
     error NotAllowed();
     error ReservationLive();
 
-    constructor() ERC721("Artwork", "ART") {
+    constructor(Market market_) ERC721("Artwork", "ART") {
         artist = msg.sender;
+        market = market_;
     }
 
     function mint(address to, uint256 tokenId) external {
@@ -60,7 +63,7 @@ contract Artwork is ERC721 {
         if (msg.sender != ownerOf(tokenId) || allowedColors == 0) revert NotAllowed();
         Reservation memory old = reservation[tokenId];
         if (_live(old.right)) revert ReservationLive();
-        if (!right.market().isRight(address(right)) || right.state() != Right.State.Pending) revert NotAllowed();
+        if (!market.isRight(address(right)) || right.state() != Right.State.Pending) revert NotAllowed();
         reservation[tokenId] = Reservation(address(right), allowedColors);
         emit Reserved(tokenId, address(right), allowedColors);
     }
@@ -76,6 +79,8 @@ contract Artwork is ERC721 {
         emit Painted(tokenId, color, msg.sender);
     }
 
+    /// @dev An active, unexpired reservation remains live during exercise, when Right.isLive
+    /// returns false. This permits paintReserved to consume the reservation under its lock.
     function _live(address account) private view returns (bool) {
         if (account == address(0)) return false;
         Right right = Right(payable(account));
