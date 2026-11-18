@@ -14,6 +14,25 @@ The new `Market` creates an `Order` implementation, a `Right` implementation and
 
 `Market.rights()` and `Market.rightImplementation()` identify the canonical token and backing implementation. `Market.rightAddress(issuer, handler, configHash, deadline, residual, salt)` predicts an individual backing account; verify `Market.isRight(account)` before relying on it. `Rights.accountOf(tokenId)` authenticates a Market-created account. Each right publishes its config in `RightCreated`; its activation terms, deadline, state and residual beneficiary can be read from the account.
 
+### Rights candidate: Sepolia preparation and release gate
+
+The client pins protocol source `91b22d3` in `contracts/market` and records the resulting addresses and runtime hashes in `deployments/rights-sepolia.json`. That manifest is a **candidate** with `startBlock: null`; its addresses are calculations, not a claim that code exists on Sepolia. `deployments/legacy-sepolia.json` remains the verified order-only production release at block 12,150,229. The client defaults to legacy on public Sepolia; selecting `rights-v1` does not make the candidate live. Regenerate the rights manifests only from the frozen source and inspect the diff; generation starts a private Anvil, not a public transaction.
+
+1. Freeze the source and client revision. Verify the submodule points to the intended protocol commit, compiler settings, planned CREATE2 addresses, fee admin and recipient. Run the client `pnpm --filter @market/protocol gen`, then compare its rights manifests with the simulated deployment output. Never rewrite the legacy manifest from the new build.
+2. Rehearse the *same* `Deploy.run()` path on a disposable local Sepolia fork. Check chain endpoint, the `ripe0x` signer identity, existing code at each predicted address, decoded constructor arguments, gas funding, receipts and post-state. Run a separate signer-specific Sepolia dry run after the build is warm, with no broadcast:
+
+   ```bash
+   forge script script/Deploy.s.sol:Deploy --sig 'run()' \
+     --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x
+   ```
+
+3. Compare the dry run to the candidate manifest. Confirm every predicted runtime code hash and relationship: `Market.implementation`, `Market.rightImplementation`, `Market.rights`, `Rights.market`, the Right implementation's Market/Rights bindings, `CoveredNFTPurchase.market`, `FeeConfig.market`, and each trading handler's `fees` and canonical rights collection. Confirm fee rate, fee recipient and admin. A partial deployment requires receipt and nonce reconciliation before any continuation.
+4. **Stop for explicit owner authorization immediately before each public broadcast.** Present the actual target, Sepolia chain, `ripe0x` signer, decoded deployment actions, native value, gas estimate and consequence. The authorized broadcast would use the same script and signer with `--broadcast --slow --verify`; no such command has run for rights. After each receipt, read code hashes and relationships from chain and record transaction hashes, block numbers and gas. A failed verification service is separate from transaction success.
+5. Only after those readbacks, set `deployments/rights-sepolia.json` to `status: "deployed"` with the actual Market deployment block. Start the rights indexer with `PONDER_RELEASE_ID=rights-v1`, `PONDER_CHAIN_ID=11155111`, an isolated `DATABASE_SCHEMA=market_rights_v1`, and the Tenderly public Sepolia RPC. Wait for `/api/status` to report the exact `deploymentId`, `releaseId`, chain ID, ready state and indexed head; verify right events and token ownership against chain. Keep the legacy indexer and `market_v1` schema intact.
+6. Select the rights release in a separate web deployment using `NEXT_PUBLIC_MARKET_RELEASE=rights-v1` and `NEXT_PUBLIC_CHAIN_ID=11155111`, pointing to the isolated rights indexer. Verify the UI's runtime hash guard and a signed user walkthrough: issue and activate a covered right, list, buy, resell, exercise, release credits; cancel a separate listing, expire and recover another right. Inspect token and backing ownership, deadlines, ETH splits and receipts at each step. Preserve a working legacy URL and indexer while this candidate is evaluated. Public walkthrough transactions also need their own explicit owner authorization.
+
+The signed local rehearsal is reproducible with `pnpm --filter @market/protocol rehearse:rights` in the client. Its `packages/protocol/evidence/rights-local.json` records 47 actual Anvil transactions at chain 31337, 46 successes and one intended reverted AtomicWallet issuance that left no created right or NFT deposit. The 0.2/0.3 ETH premium sales sent 0.198/0.297 ETH to their respective sellers and 0.005 ETH total trading fees; 1 ETH exercise credited 0.95 ETH proceeds and 0.05 ETH royalty. These are local receipts with nonzero gas prices, not Sepolia transactions. The protocol's Foundry lifecycle script below is a separate simulation.
+
 ## Historical order-only addresses (superseded for new rights)
 
 ## Addresses

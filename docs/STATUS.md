@@ -2,12 +2,25 @@
 
 ## Covered nft client milestone, 2026-11-17
 
-Baseline `main` is `f70294aa45a435f20a0c8bb9721bd698fc0a4423` (PR #16 merged). The next feature branch is `codex/covered-rights-client`; it adds generic onchain ERC721 metadata (D412). The client starts at `b4ee89ed591265964413fec58bc2dd1aca658b68`, with its verified legacy Sepolia deployment preserved separately. No rights-enabled public deployment is authorized. Metadata focused tests passed: `forge test --match-path test/RightsMetadata.t.sol -vv`, 5/5, including finite exclusive expiry before finalization, perpetual transfer/exercise, absent token URI, exact uint256 JSON deadline, execution callback status and direct deployment gas. Rights runtime/initcode 8,092/8,979 bytes; Market initcode 20,112 bytes. Final candidate manifests and actual local RPC walkthrough will be recorded after the pinned client integration.
+The transferable-rights implementation was merged to `main` at `f70294aa45a435f20a0c8bb9721bd698fc0a4423` (PR #16). The `codex/covered-rights-client` branch adds canonical onchain metadata at source `91b22d39b58e35285eede0120a65ef4e6392959f` (D412–D413); the client began at `b4ee89ed591265964413fec58bc2dd1aca658b68` and pins that source for its rights candidate. The 2026-11-16 Sepolia order-only deployment remains a separate verified legacy release. **No rights-enabled public deployment or broadcast is authorized or recorded.**
+
+| Check at metadata source `91b22d3` | Result and boundary |
+| --- | --- |
+| Solidity local candidate | `CANDIDATE_RUN=1 forge test --no-match-path 'test/fork/*' --summary`: 223 passed in 27 suites, 0 failed or skipped. Both invariant suites ran 128 × 64 calls with zero driver reverts. See `/tmp/market_metadata_candidate_local.log` for the captured run; this is local test evidence, not a public-chain transaction. |
+| Pinned fork candidate | `MAINNET_RPC_URL=https://mainnet.gateway.tenderly.co SEPOLIA_RPC_URL=https://sepolia.gateway.tenderly.co forge test --match-path 'test/fork/*' --isolate --summary`: 23 passed (14 NFT, 2 rights, 7 legacy Sepolia), 0 failed. Forked historical chain state, not the undeployed rights candidate on public Sepolia. See `/tmp/market_metadata_candidate_forks.log`. |
+| Metadata and size | Focused `forge test --match-path test/RightsMetadata.t.sol -vv`: 5 passed, including exclusive expiry before finalization, perpetual rights, absent token URI, exact uint256 deadline and execution callback status. Rights runtime/initcode 8,092/8,979 bytes; Market initcode 20,112 bytes. Direct CREATE gas is 4,284,302 for Market and 1,894,047 for Rights, increases of 740,012 and 739,151 over `f70294a` (D413). Deployment addresses change. |
+| Client local signed rehearsal | `pnpm --filter @market/protocol rehearse:rights` executed 47 signed transactions against isolated Anvil chain 31337: 46 successful and one deliberately reverted atomic issuance. The evidence file is in the client at `packages/protocol/evidence/rights-local.json`, pinned to `91b22d3`. It records right sale at 0.2 ETH, resale at 0.3 ETH, 1 ETH exercise, 0.05/0.95 ETH royalty/proceeds credits and release, listing cancellation, surrender, expiry, pending cancellation, atomic issue, and failure rollback. Gas prices in the receipts are nonzero; this is not a public broadcast. |
+
+Slither 0.11.5 ran on the metadata candidate with `slither . --skip-clean --exclude-dependencies --filter-paths 'lib/|test/|script/' --json /tmp/market_metadata_slither_final.json`: exit 255 because detectors reported 25 results; JSON success was true. The 24 existing categories are unchanged; the added `Rights.tokenURI` timestamp comparison intentionally mirrors the exclusive expiry boundary. This triage found no new actionable issue and is not an independent audit.
+
+Client package tests are reported separately by the client release record. Browser interaction evidence is still pending and is not implied by the contract or local RPC results.
 
 
-Updated 2026-11-17. Transferable-rights candidate on `codex/transferable-rights`, based on `79120eb`. The previous rights candidate was merged through PR #16 at f70294a; no redesigned contract has been broadcast. Earlier Sepolia records below remain historical evidence for the order-only release.
+## Merged rights baseline evidence
 
-## Transferable-rights candidate
+The following results were collected for the `codex/transferable-rights` candidate based on `79120eb`, then merged through PR #16 at `f70294a`. They describe that earlier build. The metadata build above changes bytecode and addresses. Earlier Sepolia records below remain historical evidence for the order-only release.
+
+### Transferable-rights baseline (merged at `f70294a`)
 
 The redesign adds isolated `Right` accounts, canonical `Rights` ERC721 ownership, activation validation, fixed exercise terms, terminal recovery and per-account ETH payment credits. `CoveredNFTPurchase` and `ReservedPaint` are the two reference handlers. Existing orders, immediate PaintAction, and the direct NFT trading policy remain. **Experimental and unaudited.** No production compatibility claim is made for the new addresses.
 

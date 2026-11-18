@@ -8,6 +8,8 @@ The core has no owner, fee, registry or upgrade path. The reference NFT trading 
 
 > **Status: experimental, unaudited.** Tests and automated reviews are evidence about tested behaviour, not a safety claim ([docs/STATUS.md](docs/STATUS.md), [docs/SECURITY.md](docs/SECURITY.md)). Nothing is deployed to mainnet.
 
+The rights implementation is merged, but the rights-enabled contracts are **not deployed on Sepolia**. The verified 2026-11-16 Sepolia addresses are for the order-only release. The current metadata build is recorded in [status](docs/STATUS.md) and the [deployment reference](docs/DEPLOYMENT.md); the client maintains separate legacy and rights release manifests.
+
 ## How it works
 
 **Market creates orders and right accounts. Orders execute on fill. Rights hold authority until their ERC721 holder exercises or terminates them.**
@@ -71,6 +73,8 @@ The covered NFT purchase handler activates only when the right's immutable resid
 Check the pending account's residual address **before depositing**. A covered NFT account configured with a non-issuer residual cannot activate, but after canceled or expired setup that named residual can recover its deposits. No transferable token is minted for the rejected setup.
 
 The right's **deadline is exclusive**: `block.timestamp >= deadline` ends exercise and transfer, without waiting for finalization. Deadline `0` is a perpetual commitment with no issuer cancellation path after activation. Keep an order's trading deadline earlier than the right's deadline to leave a useful exercise window. A generic NFT buyer must inspect the right's terms and remaining time; ordinary NFT trading cannot guarantee this window for them.
+
+The canonical `Rights.tokenURI` provides onchain JSON for an existing entitlement: backing account, issuer, handler and code hash, configuration hash, activation terms, residual beneficiary, exact deadline string, state and effective liveness. It calls no handler or target contract. Interpret operation-specific terms from the `RightCreated` config and the bound handler; token metadata alone is not a value or safety certificate. At a finite deadline it reports expired even before finalization; pending and burned tokens have no URI.
 
 | Action | Asset/payment effect | Who controls it |
 | --- | --- | --- |

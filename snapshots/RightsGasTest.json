@@ -1,10 +1,10 @@
 {
-  "right: activate covered NFT": "232114",
+  "right: activate covered NFT": "232109",
   "right: create pending": "127135",
-  "right: exercise covered NFT": "201511",
-  "right: finalize expiry": "52200",
+  "right: exercise covered NFT": "201501",
+  "right: finalize expiry": "52195",
   "right: recover NFT": "72939",
   "right: release royalty credit": "71728",
-  "right: sale premium": "190782",
-  "right: transfer entitlement": "71282"
+  "right: sale premium": "190747",
+  "right: transfer entitlement": "71277"
 }
