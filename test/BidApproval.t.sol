@@ -175,4 +175,35 @@ contract BidApprovalTest is Base {
         bid.execute(abi.encode(uint256(30), uint256(0), attacker));
         assertEq(nft.ownerOf(30), victim);
     }
+
+    // (1b) During an active execution a proceeds receiver runs with the order as msg.sender, so a
+    //      token approved to the Order is exposed; one approved to ExchangeAction is not.
+
+    function _proceedsAbuse(address approved) internal returns (ApprovalThief thief) {
+        thief = new ApprovalThief();
+        address victim = makeAddr("victim");
+        thief.mint(victim, 2);
+        Order bid = _bid(IERC721(address(nft)), true, 0, bidder, 1, 1 ether);
+        vm.prank(victim);
+        thief.approve(approved == address(0) ? address(bid) : approved, 2);
+        thief.arm(2, victim, attacker);
+        nft.mint(attacker, 9);
+        vm.startPrank(attacker);
+        nft.approve(address(exchange), 9);
+        bid.execute(abi.encode(uint256(9), uint256(0), address(thief)));
+        vm.stopPrank();
+        assertEq(nft.ownerOf(9), bidder);
+        assertEq(address(thief).balance, 0.99 ether);
+    }
+
+    function test_proceedsReceiverAbusesOrderApprovalDuringExecution() public {
+        ApprovalThief thief = _proceedsAbuse(address(0));
+        assertEq(thief.ownerOf(2), attacker, "an Order approval is usable by a payee mid-execution");
+    }
+
+    function test_proceedsReceiverCannotAbuseExchangeApproval() public {
+        ApprovalThief thief = _proceedsAbuse(address(exchange));
+        assertEq(thief.ownerOf(2), makeAddr("victim"));
+        assertTrue(thief.armed());
+    }
 }
