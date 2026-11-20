@@ -725,3 +725,22 @@ contract CoreTest is ProbeBase {
         assertEq(uint8(b.state()), uint8(OrderState.Completed));
     }
 }
+
+contract InvalidAdmissionTest is Base {
+    function test_invalidAdmissionRejected() public {
+        OrderSpec memory spec = _spec(address(exchange), Admission.Public, 0, seller, hex"01");
+        bytes memory data = abi.encodeCall(Market.create, (spec, bytes32(uint256(1))));
+        // OrderSpec is dynamic: word 0 selector-offset, struct head at 4+64; admission is its 2nd word.
+        uint256 slot = 4 + 64 + 32;
+        assembly {
+            mstore(add(add(data, 0x20), slot), 2)
+        }
+        vm.prank(seller);
+        (bool ok,) = address(market).call(data);
+        assertFalse(ok);
+        spec.admission = Admission.Holder;
+        vm.prank(seller);
+        (ok,) = address(market).call(abi.encodeCall(Market.create, (spec, bytes32(uint256(1)))));
+        assertTrue(ok);
+    }
+}

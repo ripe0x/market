@@ -253,8 +253,8 @@ contract Order {
     /// @notice The issuer ends a Pending order, or a Live Public order. A Live Holder order is
     /// a commitment to its holder and cannot be canceled. After the deadline use finalizeExpiry.
     function cancel() external {
-        if (msg.sender != issuer()) revert Unauthorized();
         _requireIdle();
+        if (msg.sender != issuer()) revert Unauthorized();
         OrderState s = state;
         if (s != OrderState.Pending && !(s == OrderState.Live && admission() == Admission.Public)) {
             revert WrongState();
@@ -349,8 +349,8 @@ contract Order {
 
     /// @notice The residual beneficiary takes uncredited ETH once the order is not live.
     function withdrawSurplus(address recipient, uint256 amount) external {
-        if (msg.sender != residual()) revert Unauthorized();
         _requireIdle();
+        if (msg.sender != residual()) revert Unauthorized();
         if (state == OrderState.Live) revert WrongState();
         if (recipient == address(0)) revert ZeroAddress();
         if (amount > freeBalance()) revert EncumberedBalance();
