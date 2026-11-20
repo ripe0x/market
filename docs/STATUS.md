@@ -1,5 +1,25 @@
 # Status
 
+## Unified action candidate, 2026-11-19
+
+**Experimental, unaudited, undeployed.** Production source frozen at `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7` (branch `claude/unified-actions`, based on PR #17 head `0e8832c`). Later commits on the branch change only documentation. Design: [SPEC](SPEC.md), [ACTIONS](ACTIONS.md), decisions D501–D511.
+
+| Check at `45492b9` | Command | Result |
+| --- | --- | --- |
+| Whole suite incl. mainnet fork | `CANDIDATE_RUN=1 forge test --summary` | exit 0; 202 passed, 0 failed, 0 skipped in 18 suites. Includes 5 mainnet fork tests at block 26,450,000 via `https://mainnet.gateway.tenderly.co` (BAYC and Opepen sales, Azuki and Chimpers bids, Opepen covered purchase) and the default-profile invariant run. |
+| Deep invariant | `FOUNDRY_PROFILE=invariant CANDIDATE_RUN=1 forge test --match-path test/Invariant.t.sol` | exit 0; 1,000 runs × 128 calls, `fail_on_revert = true`, 0 reverts, 0 discards, 90.8 s. 21 handler actions each called about 355–425 times in the default run with 0 reverts; expected rejections are asserted with exact selectors inside `probeReject`. The deterministic trace reaches all 28 transition types. Exact model: per-order balance and credits, per-beneficiary credits, token existence and owner, global ETH conservation, every tracked NFT owner. |
+| Local rehearsal | `script/rehearse.sh` | exit 0; plain local Anvil 31337 with disposable unlocked key; Deploy, Artwork example and full lifecycle. Receipts include sale fee 0.1, royalty 0.5, refund 1; Actions resale premium 2, fee 0.02; covered royalty credit 0.4; AcquireAndExecute premium 1 + execution 5 with refund 1; both recovery paths returned the NFT. |
+| Sizes | `forge build --sizes --skip test --skip script` | Runtime bytes: Order 7,409, Market 2,047 (initcode 18,568), Actions 7,803, ExchangeAction 10,155, CoveredNFTPurchase 5,131, ReservedAction 4,329, AcquireAndExecute 4,468, Artwork 5,968, FeeConfig 924. |
+| Gas | `forge test --match-path test/Gas.t.sol --isolate` | create+activate sale 302,308; sale execute 168,764; bid create 219,066; bid execute 162,167; covered issue 155,974; covered execute 167,515; credit withdrawal 37,308. Solc 0.8.30, via-IR, optimizer 200, prague. |
+| Static analysis | `slither . --exclude-dependencies --filter-paths 'lib/|test/|script/'` (0.11.5, at `abd057a`, production code then differing only by the royalty cap and the phase-check order) | 27 results: reentrancy reports on paths guarded by the phase lock, timestamp comparisons for the exclusive deadline, assembly, low-level calls, and Market's payable creation. No actionable finding. |
+| Independent review | Separate reviewer, owner requirements and audit standard, no prior findings | No critical or high finding. Low R1 reservation executor poisoning (documented, regression in `test/review/`). Not an audit. |
+
+Findings and regressions: bid approval attacks through an Order approval (native withdrawal and active proceeds receiver) in `test/BidApproval.t.sol`; reservation poisoning in `test/review/ReviewReservation.t.sol`.
+
+Replaced coverage: the order, rights, handler and PaintAction suites were removed with their contracts. Their properties (factory determinism, code pin, credits, recovery, NFT trading money terms, royalty cap, rights transfer rules, hostile receivers, composition) are re-covered by `Core`, `ActionsToken`, `Credits`, `Exchange`, `Covered`, `Reserved`, `Acquire` and the invariant. Not reproduced: the legacy Sepolia live fork checks and the FillVerifier-specific tests (FillVerifier is unchanged apart from comments and has no test in this candidate).
+
+Remaining unverified: real wallet extensions; any public chain; a funded rehearsal or canary; an independent audit. ERC721 operators of Actions tokens can take the token and execute; see [SECURITY](SECURITY.md).
+
 ## Focused contract and client improvements, 2026-11-18
 
 Production source is frozen at `cf7f48d8fae716740c59f882dcc2761497c2a63b`: functional `9d7f43d` authenticates Artwork against its immutable configured Market and removes redundant mint history; separate `cf7f48d` changes only production comments. The client pins complete revision `c211808cf3dd6ed36f41e92d885e6f866a4b9436`, including the fork-test repair, and regenerates ABIs and candidate manifests. The production files are unchanged from cf7f48d. This supersedes the preceding metadata candidate identity, not historical public deployments.
