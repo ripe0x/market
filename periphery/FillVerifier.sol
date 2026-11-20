@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 /// @title FillVerifier
 /// @notice Outcome checks for calls made within one transaction. A calling account can take
-/// a snapshot, fill an order and check the resulting state. A failed check reverts its call;
+/// a snapshot, execute an order and check the resulting state. A failed check reverts its call;
 /// reverting the entire transaction requires that failure to propagate through the caller:
-/// payment and approvals are then rolled back with the fill.
+/// payment and approvals are then rolled back with the execution.
 ///
 ///   1. `snapshot(nft, balanceOf(me))`
-///   2. `order.fill(config, input)`, sent by the filler itself, as usual
+///   2. `order.execute(input)`, sent by the executing account itself, as usual
 ///   3. `requireIncrease(nft, balanceOf(me), 1)`, or `requireEqual(nft, ownerOf(id), me)`
 ///
 /// It has no custody functions or owner, needs no approvals and reads other contracts only with
@@ -35,7 +35,7 @@ contract FillVerifier {
 
     /// @notice Revert unless `target` now returns at least `minimum` more for `query` than at
     /// the caller's snapshot of the same query. Uses up the snapshot, so a second check needs a
-    /// fresh one: otherwise two fills could both be judged against the first one's baseline.
+    /// fresh one: otherwise two executions could both be judged against the first one's baseline.
     function requireIncrease(address target, bytes calldata query, uint256 minimum) external {
         bytes32 slot = _slot(target, query);
         uint256 before;
