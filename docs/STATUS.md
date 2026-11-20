@@ -16,7 +16,7 @@
 
 Findings and regressions: bid approval attacks through an Order approval (native withdrawal and active proceeds receiver) in `test/BidApproval.t.sol`; reservation poisoning in `test/review/ReviewReservation.t.sol`.
 
-Replaced coverage: the order, rights, handler and PaintAction suites were removed with their contracts. Their properties (factory determinism, code pin, credits, recovery, NFT trading money terms, royalty cap, rights transfer rules, hostile receivers, composition) are re-covered by `Core`, `ActionsToken`, `Credits`, `Exchange`, `Covered`, `Reserved`, `Acquire` and the invariant. Not reproduced: the legacy Sepolia live fork checks and the FillVerifier-specific tests (FillVerifier is unchanged apart from comments and has no test in this candidate).
+Replaced coverage: the order, rights, handler and PaintAction suites were removed with their contracts. Their properties (factory determinism, code pin, credits, recovery, NFT trading money terms, royalty cap, rights transfer rules, hostile receivers, composition) are re-covered by `Core`, `ActionsToken`, `Credits`, `Exchange`, `Covered`, `Reserved`, `Acquire` and the invariant. Not reproduced: the legacy Sepolia live fork checks. The FillVerifier suite was restored after the whole-suite run: `forge test --match-path test/FillVerifier.t.sol`, 10 passed.
 
 Remaining unverified: real wallet extensions; any public chain; a funded rehearsal or canary; an independent audit. ERC721 operators of Actions tokens can take the token and execute; see [SECURITY](SECURITY.md).
 
