@@ -46,6 +46,8 @@ Experimental and unaudited. Automated tests and the author's adversarial review 
 - `ownerOf`-based delivery checks trust the collection.
 - Reservation targets must enforce their own authority, expiry and consumption; a perpetual reservation to an unusable executor occupies its scope forever; target code hash checks do not freeze proxies or mutable dependencies.
 - ERC721 operators of Actions tokens can take the token and execute.
+- Reservation executor poisoning (finding R1, low): a reservation record is permanent per executor address, so anyone the target lets reserve (for example any Artwork token owner) can reserve first for another issuer's predicted order address, after which that address can never hold the intended reservation. No funds are lost. The `reserve` transaction itself reveals the address, so an unpredictable salt alone does not prevent it; reserve and create in one atomic transaction (wallet batching) or submit privately. Regression: `test/review/ReviewReservation.t.sol`.
+- Transferring backing to a predicted address before `create` leaves it at an address no contract controls until the order is created. Prefer create, then transfer, then activate.
 - Royalty is paid on execution prices only through the action that pays it; Actions token resale premiums carry no royalty.
 - Fee recipient or royalty receiver refusing ETH blocks ordinary exchanges until changed; the seller can cancel and recover.
 

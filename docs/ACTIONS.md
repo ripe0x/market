@@ -54,7 +54,7 @@ The target authorizes reservation creation with its own rules, records one perma
 
 `ReservedAction` `Config { target; bytes operation; uint256 price; uint256 targetValue; address proceedsTo; }`, `targetValue <= price`. Activation requires a matching Reserved reservation for the order address with the same deadline and value, and commits the target's runtime code hash. Execution takes exactly `price`, calls `performAction{value: targetValue}` from the order, verifies consumption and credits `price - targetValue`. Works with either admission. Release: residual only while Pending; anyone once ended.
 
-`examples/Artwork.sol` reserves one palette or renderer change among an allowed bitmask. Reservations survive transfer, block burning while live, and do not stop the owner's own later changes. A perpetual reservation to an unusable executor occupies its scope permanently.
+`examples/Artwork.sol` reserves one palette or renderer change among an allowed bitmask. Reservations survive transfer, block burning while live, and do not stop the owner's own later changes. A perpetual reservation to an unusable executor occupies its scope permanently. Executor records are permanent per address, so anyone allowed to reserve can poison a predicted order address; reserve and create atomically.
 
 ## AcquireAndExecute
 
@@ -63,7 +63,7 @@ The target authorizes reservation creation with its own rules, records one perma
 ## Integration walkthrough
 
 1. Build an `OrderSpec` and pick a salt. `Market.orderAddress(issuer, spec, salt)` gives the address.
-2. Put backing in place: transfer the NFT to the predicted address (sale, covered), have the target reserve for it (reserved), or send ETH with creation (bid).
+2. Put backing in place, preferably after `create` and before `activate` so assets never sit at an undeployed address: transfer the NFT to the predicted address (sale, covered), have the target reserve for it (reserved), or send ETH with creation (bid).
 3. `Market.createAndActivate{value}(spec, salt)`, or `create` then `activate`. `previewActivation()` on a Pending order shows the terms activation would store.
 4. Execute with `order.execute{value}(input)`.
 5. After termination, withdraw credits (`releaseCredit`/`withdrawCredit`), release backing (`release`) and surplus (`withdrawSurplus`).
