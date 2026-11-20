@@ -1,106 +1,320 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @notice Defines what happens when an order is filled: checks conditions, decides which calls
-/// the order makes and may keep state between fills. One handler can serve many orders.
-/// @dev Order.execute grants authority over the calling order only during its fill. A handler
-/// must authenticate its caller before using separately granted authority or trusting fill
-/// context. NFTBid uses ERC721 approvals granted to the shared handler. State shared between
-/// orders must be keyed by the authenticated order.
-interface IOrderHandler {
-    /// @notice Called by an order from inside `Order.fill`. While this call runs, and only
-    /// then, `msg.sender.execute` accepts calls from this handler. Revert to reject the fill;
-    /// everything the fill did is undone.
-    /// @param caller The authenticated account that called fill. The handler must enforce
-    /// any limits on using that account's assets or approvals.
-    /// @param value ETH sent with `fill`. The order already holds it.
-    /// @param config The order's configuration. The order has checked it against its commitment.
-    /// @param input The caller's parameters. Untrusted.
-    /// @return result Returned to the caller of `fill`.
-    function onFill(address caller, uint256 value, bytes calldata config, bytes calldata input)
-        external
-        returns (bytes memory result);
+import {Actions} from "./Actions.sol";
+
+/// @notice Who may execute a live order. Public: any account the action accepts, repeatedly
+/// until the action reports completion. Holder: only the current owner of the order's Actions
+/// token, in one call that must complete.
+enum Admission {
+    Public,
+    Holder
+}
+
+enum OrderState {
+    Pending,
+    Live,
+    Completed,
+    Canceled,
+    Expired,
+    Surrendered
+}
+
+/// @notice What the order is doing within the current transaction. Every state-changing entry
+/// point requires Idle, so an order never runs two operations at once.
+enum Phase {
+    Idle,
+    Activating,
+    Executing,
+    Releasing,
+    Withdrawing
+}
+
+/// @notice Every commitment an order address is derived from, except the issuer, the action's
+/// runtime code hash and the salt.
+struct OrderSpec {
+    address action;
+    Admission admission;
+    /// Exclusive: the order cannot execute at or after this timestamp. Zero never expires.
+    uint64 deadline;
+    /// Receives backing and surplus once the order is no longer live. Never zero.
+    address residual;
+    bytes config;
+}
+
+/// @notice An action implementation, shared by many orders. Each callback comes from the order
+/// it concerns; an implementation must authenticate that the caller is a Market order bound to
+/// it and that the arguments match the order's own readable context before relying on them.
+interface IAction {
+    /// @notice Check backing and terms before the order goes live. The order stores the
+    /// returned bytes once as its activation terms. Also used for advisory previews.
+    function validate(address order, bytes calldata config) external view returns (bytes memory activationTerms);
+
+    /// @notice Perform one execution through the calling order. `input` is untrusted. Return
+    /// `complete` to end the order; a Holder order reverts unless this is true.
+    function onExecute(
+        address actor,
+        uint256 suppliedValue,
+        bytes calldata config,
+        bytes calldata activationTerms,
+        bytes calldata input
+    ) external returns (bool complete, bytes memory result);
+
+    /// @notice Clean up backing of an order that is not live. `recipient` is the residual
+    /// beneficiary unless the residual itself called and chose another.
+    function onRelease(
+        address actor,
+        address recipient,
+        bytes calldata config,
+        bytes calldata activationTerms,
+        bytes calldata input
+    ) external returns (bytes memory result);
 }
 
 /// @title Order
-/// @notice A cancelable execution account with its own address, balance and storage. Market
-/// creates ERC-1167 clones with immutable arguments. Compatible clones can also be deployed
-/// outside Market; those accounts have no Market.createdAt record.
+/// @notice An isolated account for one authorized contract action. Market deploys it as an
+/// ERC-1167 clone of this contract with the issuer, the action, the action's runtime code hash,
+/// the admission, deadline, residual beneficiary and full configuration appended to its code, so
+/// every commitment is part of the address and stays readable after the order ends.
 ///
-/// Authority over this account's assets and permissions follows its lifecycle:
-/// - Active: only `handler`, only during a fill, which anyone may start by calling `fill`.
-///   The owner may only `close`.
-/// - Closed, permanently: no more fills. The current fill retains handler execution authority
-///   until it returns; otherwise only `owner` can execute for recovery and revocation.
-/// Recovery remains subject to external asset rules, including Rights transfer restrictions.
+/// Lifecycle: Pending until activation, then Live, then exactly one terminal state. Only the
+/// bound action acts as the order, and only inside `execute` or `release`. Neither the issuer nor
+/// the residual beneficiary can make arbitrary calls as the order.
 ///
-/// The owner, the handler, the handler's code hash and the hash of its configuration are
-/// appended to the clone's code at deployment, so they are part of the order's address and can
-/// never change. There is no initializer. Nothing in this contract knows what the order trades.
-/// The only `delegatecall` is the clone's own, to this fixed code; there is no upgrade path and
-/// no other privileged party.
+/// Native accounting: `totalCredits` of the balance is owed to credited beneficiaries and is
+/// never spent by execution, release or surplus withdrawal.
+///
+/// The action code hash pins runtime bytecode only. It does not freeze a proxy's target,
+/// mutable storage, dependencies or privileges held elsewhere.
 contract Order {
-    /// @notice Permanently stops new fills. Owner execution begins after any current fill ends.
-    bool public closed;
-    /// @notice True only while `fill` is running. External contracts that grant this order
-    /// authority can check it to accept calls made through the handler and refuse the owner.
-    bool public transient filling;
+    /// @dev Proxy code length preceding the appended arguments.
+    uint256 private constant ARGS = 0x2d;
+    /// @dev issuer 20, action 20, code hash 32, admission 1, deadline 8, residual 20.
+    uint256 private constant FIXED_ARGS = 101;
 
-    /// @dev Inside a clone `address(this)` is the clone, so this matches only direct calls to
-    /// the implementation, which has no owner, handler or terms and must never act as an order.
+    address public immutable market;
+    Actions public immutable actions;
     address private immutable implementation = address(this);
 
-    event Filled(address indexed caller, uint256 value);
-    event Closed();
+    OrderState public state;
+    /// @notice Stored once at activation.
+    bytes public activationTerms;
+    mapping(address beneficiary => uint256) public creditOf;
+    uint256 public totalCredits;
 
-    error Unauthorized();
-    error OrderClosed();
-    error Reentrant();
-    error WrongConfig();
-    error HandlerCodeChanged();
+    Phase public transient phase;
+    /// @notice The caller of the current `execute` or `release`.
+    address public transient actor;
+    /// @notice ETH sent with the current `execute`.
+    uint256 public transient suppliedValue;
+    /// @notice Recipient of the current `release`.
+    address public transient releaseRecipient;
+
+    event Activated(bytes activationTerms);
+    event Executed(address indexed actor, uint256 suppliedValue, bool complete);
+    event Canceled();
+    event Surrendered(address indexed holder);
+    event Expired();
+    event Released(address indexed actor, address indexed recipient);
+    event Credited(address indexed beneficiary, uint256 amount);
+    event CreditWithdrawn(address indexed beneficiary, address indexed recipient, uint256 amount);
+    event SurplusWithdrawn(address indexed recipient, uint256 amount);
+
     error NotAnOrder();
+    error Unauthorized();
+    error WrongState();
+    error Busy();
+    error DeadlinePassed();
+    error NotExpired();
+    error ActionCodeChanged();
+    error Incomplete();
+    error EncumberedBalance();
+    error ZeroAddress();
+    error TransferFailed();
 
-    function owner() public view returns (address) {
-        return address(bytes20(_arg(0)));
+    constructor(address market_, Actions actions_) {
+        market = market_;
+        actions = actions_;
     }
 
-    function handler() public view returns (IOrderHandler) {
-        return IOrderHandler(address(bytes20(_arg(20))));
+    // ---- commitments ----
+
+    function issuer() public view returns (address) {
+        return address(bytes20(_word(0)));
     }
 
-    /// @notice Committed handler runtime bytecode hash. Fills require it unchanged; mutable
-    /// handler storage and external dependencies are not committed by this hash.
-    function handlerCodehash() public view returns (bytes32) {
-        return _arg(40);
+    function action() public view returns (address) {
+        return address(bytes20(_word(20)));
     }
 
-    function configHash() public view returns (bytes32) {
-        return _arg(72);
+    function actionCodehash() public view returns (bytes32) {
+        return _word(40);
     }
 
-    /// @notice Invoke the bound handler with the caller, value and committed configuration.
-    /// The handler defines settlement conditions and payment authorization. A handler revert
-    /// rolls back the entire fill.
-    function fill(bytes calldata config, bytes calldata input) external payable returns (bytes memory result) {
-        if (closed) revert OrderClosed();
-        if (filling) revert Reentrant();
-        if (keccak256(config) != configHash()) revert WrongConfig();
-        IOrderHandler h = handler();
-        // Since EIP-6780 deployed code can change only by being destroyed in its creation
-        // transaction and redeployed; this refuses to run code other than what was committed.
-        if (address(h).codehash != handlerCodehash()) revert HandlerCodeChanged();
-        filling = true;
-        result = h.onFill(msg.sender, msg.value, config, input);
-        filling = false;
-        emit Filled(msg.sender, msg.value);
+    function admission() public view returns (Admission) {
+        return Admission(uint8(bytes1(_word(72))));
     }
 
-    /// @notice Make one call as this order. During a fill only the handler may call this, even
-    /// if it has closed the order in that fill. Otherwise only the owner, and only once the order
-    /// is closed. A failing call reverts with its own reason.
-    function execute(address target, uint256 value, bytes calldata data) external returns (bytes memory ret) {
-        bool allowed = filling ? msg.sender == address(handler()) : closed && msg.sender == owner();
-        if (!allowed) revert Unauthorized();
+    function deadline() public view returns (uint64) {
+        return uint64(bytes8(_word(73)));
+    }
+
+    function residual() public view returns (address) {
+        return address(bytes20(_word(81)));
+    }
+
+    function config() public view returns (bytes memory c) {
+        _requireClone();
+        uint256 size;
+        assembly ("memory-safe") {
+            size := sub(extcodesize(address()), add(ARGS, FIXED_ARGS))
+        }
+        c = new bytes(size);
+        assembly ("memory-safe") {
+            extcodecopy(address(), add(c, 0x20), add(ARGS, FIXED_ARGS), size)
+        }
+    }
+
+    /// @notice The Actions token id of a Holder order: its own address.
+    function tokenId() public view returns (uint256) {
+        _requireClone();
+        return uint256(uint160(address(this)));
+    }
+
+    // ---- views ----
+
+    function freeBalance() public view returns (uint256) {
+        return address(this).balance - totalCredits;
+    }
+
+    function isExpired() public view returns (bool) {
+        uint256 end = deadline();
+        return end != 0 && block.timestamp >= end;
+    }
+
+    /// @notice Executable now: live, unexpired and not in the middle of an operation.
+    function isLive() public view returns (bool) {
+        return state == OrderState.Live && phase == Phase.Idle && !isExpired();
+    }
+
+    /// @notice What `activate` would store, computed now. Advisory: backing can change before
+    /// activation.
+    function previewActivation() external view returns (bytes memory) {
+        _checkCode();
+        return IAction(action()).validate(address(this), config());
+    }
+
+    // ---- lifecycle ----
+
+    /// @notice Validate backing and go live. Only the issuer, or Market inside
+    /// `createAndActivate` for the order it just created. A Holder order mints its token to the
+    /// issuer without a receiver callback.
+    function activate() external {
+        if (msg.sender != issuer() && msg.sender != market) revert Unauthorized();
+        _requireIdle();
+        if (state != OrderState.Pending) revert WrongState();
+        if (isExpired()) revert DeadlinePassed();
+        _checkCode();
+        phase = Phase.Activating;
+        bytes memory terms = IAction(action()).validate(address(this), config());
+        activationTerms = terms;
+        state = OrderState.Live;
+        if (admission() == Admission.Holder) actions.mint(issuer(), tokenId());
+        phase = Phase.Idle;
+        emit Activated(terms);
+    }
+
+    /// @notice Run the action once. A failed action reverts every effect of the call.
+    function execute(bytes calldata input) external payable returns (bytes memory result) {
+        _requireIdle();
+        if (state != OrderState.Live) revert WrongState();
+        if (isExpired()) revert DeadlinePassed();
+        bool holder = admission() == Admission.Holder;
+        if (holder && actions.ownerOf(tokenId()) != msg.sender) revert Unauthorized();
+        _checkCode();
+
+        phase = Phase.Executing;
+        actor = msg.sender;
+        suppliedValue = msg.value;
+        bool complete;
+        (complete, result) = IAction(action()).onExecute(msg.sender, msg.value, config(), activationTerms, input);
+        if (complete) {
+            state = OrderState.Completed;
+            if (holder) actions.burn(tokenId());
+        } else if (holder) {
+            revert Incomplete();
+        }
+        phase = Phase.Idle;
+        actor = address(0);
+        suppliedValue = 0;
+        emit Executed(msg.sender, msg.value, complete);
+    }
+
+    /// @notice The issuer ends a Pending order, or a Live Public order. A Live Holder order is
+    /// a commitment to its holder and cannot be canceled. After the deadline use finalizeExpiry.
+    function cancel() external {
+        _requireIdle();
+        if (msg.sender != issuer()) revert Unauthorized();
+        OrderState s = state;
+        if (s != OrderState.Pending && !(s == OrderState.Live && admission() == Admission.Public)) {
+            revert WrongState();
+        }
+        if (isExpired()) revert DeadlinePassed();
+        state = OrderState.Canceled;
+        emit Canceled();
+    }
+
+    /// @notice The holder gives up a Live Holder order before its deadline. Burns the token.
+    function surrender() external {
+        _requireIdle();
+        if (state != OrderState.Live || admission() != Admission.Holder) revert WrongState();
+        if (isExpired()) revert DeadlinePassed();
+        if (actions.ownerOf(tokenId()) != msg.sender) revert Unauthorized();
+        state = OrderState.Surrendered;
+        actions.burn(tokenId());
+        emit Surrendered(msg.sender);
+    }
+
+    /// @notice Anyone records expiry of a Pending or Live order once its deadline has passed.
+    function finalizeExpiry() external {
+        _requireIdle();
+        OrderState s = state;
+        if (s != OrderState.Pending && s != OrderState.Live) revert WrongState();
+        if (deadline() == 0 || !isExpired()) revert NotExpired();
+        state = OrderState.Expired;
+        if (s == OrderState.Live && admission() == Admission.Holder) actions.burn(tokenId());
+        emit Expired();
+    }
+
+    /// @notice Ask the action to clean up backing while the order is Pending or terminal.
+    /// Only the residual beneficiary may choose a recipient other than itself; the action
+    /// decides who else may trigger its cleanup.
+    function release(address recipient, bytes calldata input) external returns (bytes memory result) {
+        _requireIdle();
+        if (state == OrderState.Live) revert WrongState();
+        address r = residual();
+        if (recipient == address(0)) revert ZeroAddress();
+        if (msg.sender != r && recipient != r) revert Unauthorized();
+        _checkCode();
+        phase = Phase.Releasing;
+        actor = msg.sender;
+        releaseRecipient = recipient;
+        result = IAction(action()).onRelease(msg.sender, recipient, config(), activationTerms, input);
+        phase = Phase.Idle;
+        actor = address(0);
+        releaseRecipient = address(0);
+        emit Released(msg.sender, recipient);
+    }
+
+    // ---- action authority ----
+
+    /// @notice Make one call as this order. Only the bound action, only during execute or
+    /// release. Release calls carry no ETH. Never spends credited funds.
+    function call(address target, uint256 value, bytes calldata data) external returns (bytes memory ret) {
+        Phase p = phase;
+        if (msg.sender != action() || (p != Phase.Executing && p != Phase.Releasing)) revert Unauthorized();
+        if (p == Phase.Releasing && value != 0) revert Unauthorized();
+        if (value > freeBalance()) revert EncumberedBalance();
         bool ok;
         (ok, ret) = target.call{value: value}(data);
         if (!ok) {
@@ -110,15 +324,60 @@ contract Order {
         }
     }
 
-    /// @notice Stop all future fills. Owner execution is available once the current fill ends.
-    /// Outside a fill only the owner may call this. During a fill only this order itself may,
-    /// through execute, so only the handler can end the order mid-fill. The owner cannot close
-    /// under it. External permissions remain until the owner or handler revokes them.
-    function close() external {
-        if (msg.sender != (filling ? address(this) : owner())) revert Unauthorized();
-        closed = true;
-        emit Closed();
+    /// @notice Reserve part of the free balance for `beneficiary`. Only the bound action, only
+    /// during execution. Credits survive every terminal state.
+    function credit(address beneficiary, uint256 amount) external {
+        if (msg.sender != action() || phase != Phase.Executing) revert Unauthorized();
+        if (beneficiary == address(0)) revert ZeroAddress();
+        if (amount > freeBalance()) revert EncumberedBalance();
+        creditOf[beneficiary] += amount;
+        totalCredits += amount;
+        emit Credited(beneficiary, amount);
     }
+
+    // ---- withdrawals ----
+
+    /// @notice Anyone may pay a beneficiary its credit; the destination cannot be changed.
+    function releaseCredit(address beneficiary) external {
+        _withdrawCredit(beneficiary, beneficiary);
+    }
+
+    /// @notice A beneficiary sends its own credit wherever it chooses.
+    function withdrawCredit(address recipient) external {
+        _withdrawCredit(msg.sender, recipient);
+    }
+
+    /// @notice The residual beneficiary takes uncredited ETH once the order is not live.
+    function withdrawSurplus(address recipient, uint256 amount) external {
+        _requireIdle();
+        if (msg.sender != residual()) revert Unauthorized();
+        if (state == OrderState.Live) revert WrongState();
+        if (recipient == address(0)) revert ZeroAddress();
+        if (amount > freeBalance()) revert EncumberedBalance();
+        _send(recipient, amount);
+        emit SurplusWithdrawn(recipient, amount);
+    }
+
+    function _withdrawCredit(address beneficiary, address recipient) private {
+        _requireIdle();
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 amount = creditOf[beneficiary];
+        if (amount == 0) return;
+        creditOf[beneficiary] = 0;
+        totalCredits -= amount;
+        _send(recipient, amount);
+        emit CreditWithdrawn(beneficiary, recipient, amount);
+    }
+
+    /// @dev A failed transfer reverts, restoring any debit made before it.
+    function _send(address to, uint256 amount) private {
+        phase = Phase.Withdrawing;
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        phase = Phase.Idle;
+    }
+
+    // ---- receiving ----
 
     receive() external payable {
         _requireClone();
@@ -129,31 +388,26 @@ contract Order {
         return this.onERC721Received.selector;
     }
 
-    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external view returns (bytes4) {
-        _requireClone();
-        return this.onERC1155Received.selector;
+    // ---- internals ----
+
+    function _requireIdle() private view {
+        if (phase != Phase.Idle) revert Busy();
     }
 
-    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
-        external
-        view
-        returns (bytes4)
-    {
-        _requireClone();
-        return this.onERC1155BatchReceived.selector;
+    function _checkCode() private view {
+        if (action().codehash != actionCodehash()) revert ActionCodeChanged();
     }
 
     function _requireClone() private view {
         if (address(this) == implementation) revert NotAnOrder();
     }
 
-    /// @dev Read 32 bytes of immutable arguments after the 45 byte ERC-1167 proxy code:
-    /// owner (20 bytes), handler (20), handler code hash (32), config hash (32). In a clone,
-    /// `address()` is the clone, so this reads the clone's own code.
-    function _arg(uint256 offset) private view returns (bytes32 word) {
+    /// @dev 32 bytes of the appended arguments at `offset`. In a clone, `address()` is the
+    /// clone, so this reads the clone's own code.
+    function _word(uint256 offset) private view returns (bytes32 word) {
         _requireClone();
         assembly ("memory-safe") {
-            extcodecopy(address(), 0, add(0x2d, offset), 0x20)
+            extcodecopy(address(), 0, add(ARGS, offset), 0x20)
             word := mload(0)
         }
     }

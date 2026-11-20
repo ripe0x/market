@@ -2,36 +2,30 @@
 pragma solidity ^0.8.28;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {Market} from "../src/Market.sol";
-import {Right} from "../src/Right.sol";
+import {ReservedActionTarget} from "../reservations/ReservedActionTarget.sol";
 
 /// @title Artwork
-/// @notice Each token has a color. Its owner may paint it or assign a revocable painter.
-/// Transfer clears the painter. A one-use repaint reservation survives transfer and can be
-/// consumed during its right's exercise. The configured immutable Market authenticates a
-/// candidate reservation account before any account getters are called.
-contract Artwork is ERC721 {
-    struct Reservation {
-        address right;
-        uint256 allowedColors;
-    }
+/// @notice Example reservation target. Each token has a palette color and a renderer, each
+/// chosen from 256 options. The token owner may change either directly, and may reserve one
+/// future change of either for an executor address: the operation fixes the allowed options as
+/// a bitmask, and the executor picks one when it performs. Reservations survive transfer. A
+/// token with a live reservation cannot be burned. Reservations do not stop the owner's own
+/// later changes. ETH paid with a reserved change accrues to the artist.
+contract Artwork is ERC721, ReservedActionTarget {
+    uint8 public constant PALETTE = 0;
+    uint8 public constant RENDERER = 1;
 
     address public immutable artist;
-    Market public immutable market;
     mapping(uint256 tokenId => uint8) public colorOf;
-    mapping(uint256 tokenId => address) public painterOf;
-    mapping(uint256 tokenId => Reservation) public reservation;
+    mapping(uint256 tokenId => uint8) public rendererOf;
 
-    event Painted(uint256 indexed tokenId, uint8 color, address indexed by);
-    event PainterSet(uint256 indexed tokenId, address indexed painter);
-    event Reserved(uint256 indexed tokenId, address indexed right, uint256 allowedColors);
+    event Changed(uint256 indexed tokenId, uint8 indexed kind, uint8 choice, address indexed by);
 
     error NotAllowed();
-    error ReservationLive();
+    error ChoiceNotAllowed(uint8 choice);
 
-    constructor(Market market_) ERC721("Artwork", "ART") {
-        artist = msg.sender;
-        market = market_;
+    constructor(address artist_) ERC721("Artwork", "ART") {
+        artist = artist_;
     }
 
     function mint(address to, uint256 tokenId) external {
@@ -39,57 +33,54 @@ contract Artwork is ERC721 {
         _mint(to, tokenId);
     }
 
-    function setPainter(uint256 tokenId, address painter) external {
+    function burn(uint256 tokenId) external {
         if (msg.sender != ownerOf(tokenId)) revert NotAllowed();
-        painterOf[tokenId] = painter;
-        emit PainterSet(tokenId, painter);
+        if (isScopeReserved(scopeOf(tokenId, PALETTE)) || isScopeReserved(scopeOf(tokenId, RENDERER))) {
+            revert ScopeReserved();
+        }
+        _burn(tokenId);
     }
 
-    function resign(uint256 tokenId) external {
-        if (msg.sender != painterOf[tokenId]) revert NotAllowed();
-        delete painterOf[tokenId];
-        emit PainterSet(tokenId, address(0));
+    function change(uint256 tokenId, uint8 kind, uint8 choice) external {
+        if (msg.sender != ownerOf(tokenId)) revert NotAllowed();
+        _set(tokenId, kind, choice);
     }
 
-    function paint(uint256 tokenId, uint8 color) external {
-        if (msg.sender != ownerOf(tokenId) && msg.sender != painterOf[tokenId]) revert NotAllowed();
-        colorOf[tokenId] = color;
-        emit Painted(tokenId, color, msg.sender);
+    /// @notice The token owner grants `executor` one change of `kind` among `allowed` options.
+    function reserve(address executor, uint256 tokenId, uint8 kind, uint256 allowed, uint64 deadline, uint256 value)
+        external
+    {
+        if (msg.sender != ownerOf(tokenId) || kind > RENDERER || allowed == 0) revert NotAllowed();
+        _reserve(executor, scopeOf(tokenId, kind), operation(tokenId, kind, allowed), deadline, value);
     }
 
-    /// @notice Reserve one allowed repaint for a genuine pending right. A live reservation
-    /// survives ownership transfer and cannot be replaced by the artwork owner.
-    function reserve(uint256 tokenId, Right right, uint256 allowedColors) external {
-        if (msg.sender != ownerOf(tokenId) || allowedColors == 0) revert NotAllowed();
-        Reservation memory old = reservation[tokenId];
-        if (_live(old.right)) revert ReservationLive();
-        if (!market.isRight(address(right)) || right.state() != Right.State.Pending) revert NotAllowed();
-        reservation[tokenId] = Reservation(address(right), allowedColors);
-        emit Reserved(tokenId, address(right), allowedColors);
+    function operation(uint256 tokenId, uint8 kind, uint256 allowed) public pure returns (bytes memory) {
+        return abi.encode(tokenId, kind, allowed);
     }
 
-    /// @notice Only the executing right can use its reservation. It is consumed before the
-    /// color changes. The owner can still paint normally; no permanent visual state is promised.
-    function paintReserved(uint256 tokenId, uint8 color) external {
-        Reservation memory r = reservation[tokenId];
-        if (msg.sender != r.right || !_live(r.right) || !Right(payable(r.right)).exercising()) revert NotAllowed();
-        if ((r.allowedColors >> color) & 1 == 0) revert NotAllowed();
-        delete reservation[tokenId];
-        colorOf[tokenId] = color;
-        emit Painted(tokenId, color, msg.sender);
+    function scopeOf(uint256 tokenId, uint8 kind) public pure returns (bytes32) {
+        return keccak256(abi.encode(tokenId, kind));
     }
 
-    /// @dev An active, unexpired reservation remains live during exercise, when Right.isLive
-    /// returns false. This permits paintReserved to consume the reservation under its lock.
-    function _live(address account) private view returns (bool) {
-        if (account == address(0)) return false;
-        Right right = Right(payable(account));
-        uint256 deadline = right.deadline();
-        return right.state() == Right.State.Active && (deadline == 0 || block.timestamp < deadline);
+    function withdraw() external {
+        (bool ok,) = artist.call{value: address(this).balance}("");
+        if (!ok) revert NotAllowed();
     }
 
-    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
-        delete painterOf[tokenId];
-        return super._update(to, tokenId, auth);
+    /// @param input abi.encode(uint8 choice)
+    function _perform(bytes calldata op, bytes calldata input) internal override returns (bytes memory) {
+        (uint256 tokenId, uint8 kind, uint256 allowed) = abi.decode(op, (uint256, uint8, uint256));
+        uint8 choice = abi.decode(input, (uint8));
+        if ((allowed >> choice) & 1 == 0) revert ChoiceNotAllowed(choice);
+        _requireOwned(tokenId);
+        _set(tokenId, kind, choice);
+        return abi.encode(choice);
+    }
+
+    function _set(uint256 tokenId, uint8 kind, uint8 choice) private {
+        if (kind == PALETTE) colorOf[tokenId] = choice;
+        else if (kind == RENDERER) rendererOf[tokenId] = choice;
+        else revert NotAllowed();
+        emit Changed(tokenId, kind, choice, msg.sender);
     }
 }

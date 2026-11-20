@@ -1,444 +1,746 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {Market} from "../src/Market.sol";
-import {IOrderHandler, Order} from "../src/Order.sol";
-import {NFTSale} from "../handlers/NFTSale.sol";
 import {Base} from "./utils/Base.sol";
-import {
-    DrainHandler,
-    ProbeHandler,
-    ReentrantHandler,
-    Reenterer,
-    RevertHandler,
-    ScriptHandler,
-    StashHandler,
-    TestMulti,
-    TestToken
-} from "./utils/Mocks.sol";
+import {Rejecter} from "./utils/Mocks.sol";
+import {Market} from "../src/Market.sol";
+import {Actions} from "../src/Actions.sol";
+import {Admission, IAction, Order, OrderSpec, OrderState, Phase} from "../src/Order.sol";
+import {ActionBase} from "../actions/ActionBase.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {Errors} from "@openzeppelin/contracts/utils/Errors.sol";
+import {IERC721Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
-contract CoreTest is Base {
-    ProbeHandler probe;
+// ---------------------------------------------------------------------------
+// Scripted test action ("ProbeAction")
+//
+// A real IAction implementation (extends the shipped ActionBase so every callback runs the
+// genuine authentication path). It does nothing on its own; each `execute`/`release` carries an
+// encoded list of steps the probe performs AS the order, so the tests can drive core semantics
+// (credit, call, reentry) without leaning on the shipped trading actions.
+// ---------------------------------------------------------------------------
 
-    function setUp() public override {
+uint8 constant OP_CREDIT = 1; // o.credit(addr, amount)
+uint8 constant OP_PAY = 2; // o.call(addr, amount, "")
+uint8 constant OP_CALLRAW = 3; // o.call(addr, amount, data)
+uint8 constant OP_RE_EXECUTE = 4; // o.execute("")
+uint8 constant OP_RE_CANCEL = 5; // o.cancel()
+uint8 constant OP_RE_SURRENDER = 6; // o.surrender()
+uint8 constant OP_RE_RELEASE = 7; // o.release(addr, "")
+uint8 constant OP_RE_WSURPLUS = 8; // o.withdrawSurplus(addr, amount)
+uint8 constant OP_RE_RCREDIT = 9; // o.releaseCredit(addr)
+uint8 constant OP_RE_WCREDIT = 10; // o.withdrawCredit(addr)
+
+struct Step {
+    uint8 op;
+    address addr;
+    uint256 amount;
+    bytes data;
+}
+
+/// @dev Encode the full input the probe reads: an ordered step list, the completion flag and a
+/// revert-at-end switch (for atomicity tests).
+function encodeRun(Step[] memory steps, bool complete, bool doRevert) pure returns (bytes memory) {
+    return abi.encode(steps, complete, doRevert);
+}
+
+function noSteps() pure returns (Step[] memory s) {
+    s = new Step[](0);
+}
+
+function oneStep(uint8 op, address addr, uint256 amount, bytes memory data) pure returns (Step[] memory s) {
+    s = new Step[](1);
+    s[0] = Step(op, addr, amount, data);
+}
+
+function twoSteps(Step memory a, Step memory b) pure returns (Step[] memory s) {
+    s = new Step[](2);
+    s[0] = a;
+    s[1] = b;
+}
+
+/// @dev Plain "finish now" / "stay live" input with no side effects.
+function runComplete(bool complete) pure returns (bytes memory) {
+    return encodeRun(noSteps(), complete, false);
+}
+
+contract ProbeAction is ActionBase {
+    bytes internal constant TERMS = hex"5052"; // constant activation terms ("PR")
+
+    error ProbeRevert();
+
+    constructor(Market market_) ActionBase(market_) {}
+
+    function validate(address order, bytes calldata) external view returns (bytes memory) {
+        _validating(order);
+        return TERMS;
+    }
+
+    function onExecute(address actor, uint256 value, bytes calldata config, bytes calldata terms, bytes calldata input)
+        external
+        returns (bool, bytes memory)
+    {
+        Order o = _executing(actor, value, config, terms);
+        (Step[] memory steps, bool complete, bool doRevert) = _decode(input);
+        _run(o, steps);
+        if (doRevert) revert ProbeRevert();
+        return (complete, "");
+    }
+
+    function onRelease(
+        address actor,
+        address recipient,
+        bytes calldata config,
+        bytes calldata terms,
+        bytes calldata input
+    ) external returns (bytes memory) {
+        Order o = _releasing(actor, recipient, config, terms);
+        (Step[] memory steps,, bool doRevert) = _decode(input);
+        _run(o, steps);
+        if (doRevert) revert ProbeRevert();
+        return "";
+    }
+
+    function _decode(bytes calldata input)
+        private
+        pure
+        returns (Step[] memory steps, bool complete, bool doRevert)
+    {
+        if (input.length == 0) return (noSteps(), false, false);
+        (steps, complete, doRevert) = abi.decode(input, (Step[], bool, bool));
+    }
+
+    function _run(Order o, Step[] memory steps) private {
+        for (uint256 i; i < steps.length; ++i) {
+            Step memory s = steps[i];
+            if (s.op == OP_CREDIT) o.credit(s.addr, s.amount);
+            else if (s.op == OP_PAY) o.call(s.addr, s.amount, "");
+            else if (s.op == OP_CALLRAW) o.call(s.addr, s.amount, s.data);
+            else if (s.op == OP_RE_EXECUTE) o.execute("");
+            else if (s.op == OP_RE_CANCEL) o.cancel();
+            else if (s.op == OP_RE_SURRENDER) o.surrender();
+            else if (s.op == OP_RE_RELEASE) o.release(s.addr, "");
+            else if (s.op == OP_RE_WSURPLUS) o.withdrawSurplus(s.addr, s.amount);
+            else if (s.op == OP_RE_RCREDIT) o.releaseCredit(s.addr);
+            else if (s.op == OP_RE_WCREDIT) o.withdrawCredit(s.addr);
+            else revert("probe: bad op");
+        }
+    }
+}
+
+/// @dev A contract issuer whose ERC721 receive hook always reverts. Proves `mint` never calls it.
+contract RevertingReceiver {
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        revert("no receive");
+    }
+}
+
+/// @dev Issuer+residual that reenters the order from a callback the action makes mid-execute.
+contract Reenterer {
+    Order public order;
+
+    function setOrder(Order o) external {
+        order = o;
+    }
+
+    function reCancel() external {
+        order.cancel();
+    }
+
+    function reWithdraw(address to) external {
+        order.withdrawSurplus(to, 1);
+    }
+
+    receive() external payable {}
+}
+
+/// @dev Executes two independent orders inside one transaction.
+contract Composer {
+    function execBoth(Order a, Order b, bytes calldata ia, bytes calldata ib) external {
+        a.execute(ia);
+        b.execute(ib);
+    }
+}
+
+/// @notice Shared setup for every probe-driven suite.
+abstract contract ProbeBase is Base {
+    ProbeAction probe;
+
+    function setUp() public virtual override {
         super.setUp();
-        probe = new ProbeHandler();
+        probe = new ProbeAction(market);
     }
 
-    // ---- creation and identity ----
+    function _probeSpec(Admission a, uint64 dl, address resid) internal view returns (OrderSpec memory) {
+        return _spec(address(probe), a, dl, resid, bytes("probe-config"));
+    }
+}
 
-    function test_createDeploysAtCommittedAddress() public {
-        bytes memory config = "terms";
-        address predicted = market.orderAddress(seller, probe, keccak256(config), bytes32(uint256(7)));
+contract CoreTest is ProbeBase {
+    bytes32 constant SALT = bytes32(uint256(0x9a17));
+    uint64 constant DL = T0 + 1 days; // 1_086_400
 
-        vm.deal(seller, 1 ether);
-        vm.expectEmit(address(market));
-        emit Market.Created(Order(payable(predicted)), seller, probe, bytes32(uint256(7)), config);
-        vm.prank(seller);
-        Order order = market.create{value: 1 ether}(probe, config, bytes32(uint256(7)));
+    // ===================== factory: address commitment =====================
 
-        assertEq(address(order), predicted);
-        assertEq(order.owner(), seller);
-        assertEq(address(order.handler()), address(probe));
-        assertEq(order.configHash(), keccak256(config));
-        assertEq(address(order).balance, 1 ether);
-        assertFalse(order.closed());
-        assertFalse(order.filling());
+    function test_createMatchesPrediction() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        address predicted = market.orderAddress(issuer, spec, SALT);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        assertEq(address(o), predicted, "created address != prediction");
+        assertTrue(market.isOrder(address(o)), "isOrder not set");
+        assertFalse(market.isOrder(address(0xdead)), "isOrder true for stranger");
     }
 
-    function test_addressCommitsToEveryField() public view {
-        bytes32 h = keccak256("a");
-        address base = market.orderAddress(seller, probe, h, 0);
-        assertTrue(base != market.orderAddress(buyer, probe, h, 0));
-        assertTrue(base != market.orderAddress(seller, IOrderHandler(address(sale)), h, 0));
-        assertTrue(base != market.orderAddress(seller, probe, keccak256("b"), 0));
-        assertTrue(base != market.orderAddress(seller, probe, h, bytes32(uint256(1))));
+    function test_predictionWorksAfterDeadline() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        address predicted = market.orderAddress(issuer, spec, SALT);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        assertEq(address(o), predicted);
+        vm.warp(DL + 10); // deadline passed
+        assertEq(market.orderAddress(issuer, spec, SALT), address(o), "prediction drifted after deadline");
     }
 
-    function test_sameCommitmentCannotBeCreatedTwice() public {
-        vm.startPrank(seller);
-        market.create(probe, "x", 0);
-        vm.expectRevert();
-        market.create(probe, "x", 0);
-        vm.stopPrank();
-        // The same terms under another owner are a different order.
+    function test_everyCommittedFieldChangesAddress() public {
+        OrderSpec memory base = _probeSpec(Admission.Public, 0, issuer);
+        address a0 = market.orderAddress(issuer, base, SALT);
+
+        // issuer
+        assertTrue(market.orderAddress(buyer, base, SALT) != a0, "issuer not committed");
+
+        // action (fresh impl at a different address, also different codehash)
+        ProbeAction probe2 = new ProbeAction(market);
+        OrderSpec memory s = base;
+        s.action = address(probe2);
+        assertTrue(market.orderAddress(issuer, s, SALT) != a0, "action not committed");
+
+        // admission
+        s = base;
+        s.admission = Admission.Holder;
+        assertTrue(market.orderAddress(issuer, s, SALT) != a0, "admission not committed");
+
+        // deadline
+        s = base;
+        s.deadline = DL;
+        assertTrue(market.orderAddress(issuer, s, SALT) != a0, "deadline not committed");
+
+        // residual
+        s = base;
+        s.residual = buyer;
+        assertTrue(market.orderAddress(issuer, s, SALT) != a0, "residual not committed");
+
+        // config (single byte difference)
+        s = base;
+        s.config = bytes("probe-configX");
+        assertTrue(market.orderAddress(issuer, s, SALT) != a0, "config not committed");
+
+        // salt
+        assertTrue(market.orderAddress(issuer, base, bytes32(uint256(SALT) + 1)) != a0, "salt not committed");
+    }
+
+    function test_createdEventCarriesFullSpec() public {
+        OrderSpec memory spec = _probeSpec(Admission.Holder, DL, issuer);
+        address predicted = market.orderAddress(issuer, spec, SALT);
+        vm.expectEmit(true, true, true, true);
+        emit Market.Created(Order(payable(predicted)), issuer, spec.action, SALT, spec);
+        vm.prank(issuer);
+        market.create(spec, SALT);
+    }
+
+    // ===================== factory: rejections =====================
+
+    function test_rejectZeroResidual() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, address(0));
+        vm.prank(issuer);
+        vm.expectRevert(Market.ZeroResidual.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_rejectDeadlineNow() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, uint64(block.timestamp), issuer);
+        vm.prank(issuer);
+        vm.expectRevert(Market.BadDeadline.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_rejectDeadlinePast() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, uint64(block.timestamp - 1), issuer);
+        vm.prank(issuer);
+        vm.expectRevert(Market.BadDeadline.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_rejectCodelessAction() public {
+        OrderSpec memory spec = _spec(makeAddr("nocode"), Admission.Public, 0, issuer, bytes("x"));
+        vm.prank(issuer);
+        vm.expectRevert(Market.NoActionCode.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_reject7702DelegatedAction() public {
+        // An EIP-7702 delegation designator is exactly 0xef0100 ++ 20-byte address (23 bytes).
+        address eoa = makeAddr("eoa7702");
+        vm.etch(eoa, abi.encodePacked(hex"ef0100", bytes20(uint160(0xBEEF))));
+        assertEq(eoa.code.length, 23);
+        OrderSpec memory spec = _spec(eoa, Admission.Public, 0, issuer, bytes("x"));
+        vm.prank(issuer);
+        vm.expectRevert(Market.DelegatedAction.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_rejectOversizedConfig() public {
+        // Clones refuses immutable args longer than 0x5fd3 bytes.
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        spec.config = new bytes(0x6000);
+        vm.prank(issuer);
+        vm.expectRevert(Clones.CloneArgumentsTooLong.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_duplicateCreateReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        market.create(spec, SALT);
+        vm.prank(issuer);
+        vm.expectRevert(Errors.FailedDeployment.selector);
+        market.create(spec, SALT);
+    }
+
+    function test_configReadableAfterTerminationAndBurn() public {
+        // Holder order: complete -> Completed + token burned; config still readable from code.
+        OrderSpec memory spec = _probeSpec(Admission.Holder, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        assertEq(actions.ownerOf(_id(o)), issuer);
+        vm.prank(issuer);
+        o.execute(runComplete(true));
+        assertEq(uint8(o.state()), uint8(OrderState.Completed));
+        vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721NonexistentToken.selector, _id(o)));
+        actions.ownerOf(_id(o));
+        assertEq(o.config(), bytes("probe-config"), "config lost after burn");
+    }
+
+    // ===================== action code identity =====================
+
+    function test_codeChangeBlocksActivate() public {
+        ProbeAction tmp = new ProbeAction(market);
+        OrderSpec memory spec = _spec(address(tmp), Admission.Public, 0, issuer, bytes("c"));
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.etch(address(tmp), hex"600160005260206000f3"); // different runtime code
+        vm.prank(issuer);
+        vm.expectRevert(Order.ActionCodeChanged.selector);
+        o.activate();
+    }
+
+    function test_codeChangeBlocksExecute() public {
+        ProbeAction tmp = new ProbeAction(market);
+        OrderSpec memory spec = _spec(address(tmp), Admission.Public, 0, issuer, bytes("c"));
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.etch(address(tmp), hex"600160005260206000f3");
         vm.prank(buyer);
-        market.create(probe, "x", 0);
+        vm.expectRevert(Order.ActionCodeChanged.selector);
+        o.execute(runComplete(true));
     }
 
-    function test_createRejectsHandlerWithoutCode() public {
-        vm.expectRevert(Market.NoHandlerCode.selector);
-        market.create(IOrderHandler(makeAddr("eoa")), "", 0);
+    function test_codeChangeBlocksRelease() public {
+        ProbeAction tmp = new ProbeAction(market);
+        OrderSpec memory spec = _spec(address(tmp), Admission.Public, 0, issuer, bytes("c"));
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT); // Pending: release is permitted by state
+        vm.etch(address(tmp), hex"600160005260206000f3");
+        vm.prank(issuer);
+        vm.expectRevert(Order.ActionCodeChanged.selector);
+        o.release(issuer, "");
     }
 
-    /// Assets sent to the predicted address before deployment are controlled only by the order
-    /// that is later deployed there.
-    function test_counterfactualDeposit() public {
-        nft.mint(seller, 1);
-        bytes memory config = abi.encode(NFTSale.Config(nft, 1, _fixed(1 ether), seller, 0));
-        address predicted = market.orderAddress(seller, sale, keccak256(config), 0);
-        vm.prank(seller);
-        nft.transferFrom(seller, predicted, 1);
+    // ===================== activation authenticity =====================
 
-        vm.prank(seller);
-        Order order = market.create(sale, config, 0);
+    function test_onlyIssuerOrMarketActivate() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        OrderSpec memory spec2 = spec;
+        spec2.residual = creator; // residual != issuer so we can prank residual distinctly
+        vm.prank(issuer);
+        Order o = market.create(spec2, SALT);
+
+        vm.prank(attacker); // random account
+        vm.expectRevert(Order.Unauthorized.selector);
+        o.activate();
+
+        vm.prank(creator); // residual beneficiary
+        vm.expectRevert(Order.Unauthorized.selector);
+        o.activate();
+
+        Reenterer hostile = new Reenterer(); // hostile contract
+        vm.prank(address(hostile));
+        vm.expectRevert(Order.Unauthorized.selector);
+        o.activate();
+
+        vm.prank(issuer); // issuer succeeds
+        o.activate();
+        assertEq(uint8(o.state()), uint8(OrderState.Live));
+    }
+
+    function test_createAndActivateActivatesForCaller() public {
+        OrderSpec memory spec = _probeSpec(Admission.Holder, 0, issuer);
+        address predicted = market.orderAddress(issuer, spec, SALT);
+        vm.prank(issuer);
+        Order o = market.createAndActivate(spec, SALT);
+        assertEq(address(o), predicted);
+        assertEq(o.issuer(), issuer, "issuer is the createAndActivate caller");
+        assertEq(uint8(o.state()), uint8(OrderState.Live));
+        assertEq(actions.ownerOf(_id(o)), issuer, "token minted to issuer");
+    }
+
+    function test_activateOnceOnly() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.prank(issuer);
+        vm.expectRevert(Order.WrongState.selector);
+        o.activate();
+    }
+
+    function test_activateAfterDeadlineReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.warp(DL);
+        vm.prank(issuer);
+        vm.expectRevert(Order.DeadlinePassed.selector);
+        o.activate();
+    }
+
+    function test_mintToRevertingReceiverSucceeds() public {
+        RevertingReceiver rr = new RevertingReceiver();
+        OrderSpec memory spec = _probeSpec(Admission.Holder, 0, address(rr));
+        vm.prank(address(rr));
+        Order o = market.createAndActivate(spec, SALT);
+        // _mint (not _safeMint) means the reverting hook is never called.
+        assertEq(actions.ownerOf(_id(o)), address(rr), "token not minted to reverting receiver");
+    }
+
+    function test_previewActivationMatchesStoredTerms() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        bytes memory preview = o.previewActivation();
+        vm.prank(issuer);
+        o.activate();
+        assertEq(o.activationTerms(), preview, "stored terms != preview");
+    }
+
+    // ===================== public repeat + cancel =====================
+
+    function test_publicRepeatUntilComplete() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+
         vm.prank(buyer);
-        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
-        assertEq(nft.ownerOf(1), buyer);
+        o.execute(runComplete(false)); // stays Live
+        assertEq(uint8(o.state()), uint8(OrderState.Live));
+
+        vm.prank(bidder);
+        o.execute(runComplete(true)); // now completes
+        assertEq(uint8(o.state()), uint8(OrderState.Completed));
     }
 
-    // ---- fill and config commitment ----
-
-    function test_fillPassesCallerValueConfigAndInput() public {
-        Order order = _create(seller, probe, "cfg");
-        vm.expectEmit(address(order));
-        emit Order.Filled(buyer, 2 ether);
-        vm.prank(buyer);
-        bytes memory ret = order.fill{value: 2 ether}("cfg", "");
-        assertEq(ret, "probe");
-        assertEq(probe.caller(), buyer);
-        assertEq(probe.value(), 2 ether);
-        assertEq(probe.config(), "cfg");
-        assertTrue(probe.sawFilling());
-        assertFalse(order.filling());
-        assertEq(address(order).balance, 2 ether);
+    function test_cancelPendingPublic() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.cancel();
+        assertEq(uint8(o.state()), uint8(OrderState.Canceled));
     }
 
-    function test_fillRejectsUncommittedConfig() public {
-        Order order = _create(seller, probe, "cfg");
-        vm.expectRevert(Order.WrongConfig.selector);
-        order.fill("cfg2", "");
+    function test_cancelPendingHolder() public {
+        OrderSpec memory spec = _probeSpec(Admission.Holder, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.cancel();
+        assertEq(uint8(o.state()), uint8(OrderState.Canceled));
     }
 
-    function testFuzz_fillRejectsAnyOtherConfig(bytes calldata config) public {
-        vm.assume(keccak256(config) != keccak256("cfg"));
-        Order order = _create(seller, probe, "cfg");
-        vm.expectRevert(Order.WrongConfig.selector);
-        order.fill(config, "");
+    function test_cancelLivePublic() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.prank(issuer);
+        o.cancel();
+        assertEq(uint8(o.state()), uint8(OrderState.Canceled));
     }
 
-    function test_handlerRevertUndoesFill() public {
-        Order order = _create(seller, new RevertHandler(), "");
-        vm.prank(buyer);
-        vm.expectRevert("broken");
-        order.fill{value: 1 ether}("", "");
-        assertEq(address(order).balance, 0);
-        assertEq(buyer.balance, 100 ether);
-    }
-
-    // ---- who can act as the order ----
-
-    /// While an order is active nobody, its owner included, can make it act outside a fill.
-    function testFuzz_nobodyExecutesActiveOrderOutsideFill(address caller) public {
-        Order order = _create(seller, probe, "");
-        vm.deal(address(order), 1 ether);
-        vm.prank(caller);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(caller, 1 ether, "");
-        assertEq(address(order).balance, 1 ether);
-    }
-
-    function test_ownerExecutesOnlyAfterClosing() public {
-        Order order = _create(seller, probe, "");
-        vm.deal(address(order), 1 ether);
-        vm.startPrank(seller);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(seller, 1 ether, "");
-        order.close();
-        order.execute(seller, 1 ether, "");
-        vm.stopPrank();
-        assertEq(seller.balance, 1 ether);
-    }
-
-    function testFuzz_onlyOwnerExecutesClosedOrder(address caller) public {
-        vm.assume(caller != seller);
-        Order order = _create(seller, probe, "");
-        vm.prank(seller);
-        order.close();
-        vm.prank(caller);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(caller, 0, "");
-    }
-
-    function test_handlerCannotExecuteOutsideFill() public {
-        Order order = _create(seller, probe, "");
-        vm.prank(address(probe));
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(address(probe), 0, "");
-        // Closing hands authority to the owner, never to the handler.
-        vm.prank(seller);
-        order.close();
-        vm.prank(address(probe));
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(address(probe), 0, "");
-    }
-
-    function test_handlerExecutesDuringFill() public {
-        Order order = _create(seller, probe, "");
-        vm.prank(buyer);
-        order.fill{value: 1 ether}("", abi.encode(buyer, 1 ether, ""));
-        assertEq(buyer.balance, 100 ether);
-    }
-
-    /// The owner cannot act while a fill is running, so it cannot reach in mid-fill and take
-    /// what the handler is about to deliver.
-    function test_ownerCannotExecuteDuringFill() public {
-        Reenterer owner = new Reenterer();
-        vm.prank(address(owner));
-        Order order = market.create(probe, "", 0);
-        owner.arm(address(order), abi.encodeCall(Order.execute, (address(owner), 0, "")));
-        vm.deal(address(order), 1 ether);
-
-        // The handler pays the owner, whose receive hook tries to use owner powers.
-        vm.prank(buyer);
-        order.fill("", abi.encode(address(owner), 1 ether, ""));
-        assertTrue(owner.attempted());
-        assertFalse(owner.succeeded());
-    }
-
-    function test_filledOrderCanCallOnlyItselfToClose() public {
-        Order order = _create(seller, probe, "");
-        vm.prank(buyer);
-        order.fill("", abi.encode(address(order), 0, abi.encodeCall(Order.close, ())));
-        assertTrue(order.closed());
-    }
-
-    function test_selfCallCannotEscalate() public {
-        Order order = _create(seller, probe, "");
-        // The handler makes the order call its own execute: msg.sender is the order, not the handler.
-        bytes memory inner = abi.encodeCall(Order.execute, (buyer, 0, ""));
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.fill("", abi.encode(address(order), 0, inner));
-    }
-
-    function test_executeBubblesRevertReason() public {
-        Order order = _create(seller, probe, "");
-        vm.startPrank(seller);
-        order.close();
-        vm.expectRevert(abi.encodeWithSignature("ERC721NonexistentToken(uint256)", 9));
-        order.execute(address(nft), 0, abi.encodeCall(IERC721.ownerOf, (9)));
-        vm.stopPrank();
-    }
-
-    // ---- closing ----
-
-    function test_closeStopsFillsButKeepsRecovery() public {
-        Order order = _create(seller, probe, "");
-        vm.deal(address(order), 1 ether);
-        vm.expectEmit(address(order));
-        emit Order.Closed();
-        vm.prank(seller);
-        order.close();
-        assertTrue(order.closed());
-
-        vm.expectRevert(Order.OrderClosed.selector);
-        order.fill("", "");
-
-        vm.prank(seller);
-        order.execute(seller, 1 ether, "");
-        assertEq(seller.balance, 1 ether);
-    }
-
-    function testFuzz_onlyOwnerOrSelfCloses(address caller) public {
-        vm.assume(caller != seller);
-        Order order = _create(seller, probe, "");
-        vm.prank(caller);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.close();
-    }
-
-    /// During a fill only the handler, through the order, may close: the owner cannot close an
-    /// order under a running fill, for example from a payment's receive hook.
-    function test_ownerCannotCloseDuringFill() public {
-        Reenterer owner = new Reenterer();
-        vm.prank(address(owner));
-        Order order = market.create(probe, "", 0);
-        owner.arm(address(order), abi.encodeCall(Order.close, ()));
-        vm.deal(address(order), 1 ether);
-        vm.prank(buyer);
-        order.fill("", abi.encode(address(owner), 1 ether, ""));
-        assertTrue(owner.attempted());
-        assertFalse(owner.succeeded());
-        assertFalse(order.closed());
-    }
-
-    /// The handler closes through `execute`, as the order. Calling `close` itself is refused.
-    function test_handlerClosesOnlyThroughTheOrder() public {
-        ScriptHandler script = new ScriptHandler();
-        Order order = _create(seller, script, "");
-        bytes memory close = abi.encodeCall(Order.close, ());
-        bytes memory direct = script.script(false, address(order), 0, close);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.fill("", direct);
-        order.fill("", script.script(true, address(order), 0, close));
-        assertTrue(order.closed());
-    }
-
-    /// A handler that closes its order mid-fill keeps authority until the fill returns, and the
-    /// owner gains it only then: closing never opens a window for the owner inside a fill.
-    function test_closingInsideFillHandsOverWhenFillEnds() public {
-        ScriptHandler script = new ScriptHandler();
-        Reenterer owner = new Reenterer();
-        vm.prank(address(owner));
-        Order order = market.create(script, "", 0);
-        vm.deal(address(order), 2 ether);
-        owner.arm(address(order), abi.encodeCall(Order.execute, (address(owner), 1 ether, "")));
-
-        ScriptHandler.Step[] memory steps = new ScriptHandler.Step[](2);
-        steps[0] = ScriptHandler.Step(true, address(order), 0, abi.encodeCall(Order.close, ()));
-        steps[1] = ScriptHandler.Step(true, address(owner), 1 ether, ""); // owner's hook tries execute
-        order.fill("", abi.encode(steps));
-        assertTrue(order.closed());
-        assertTrue(owner.attempted());
-        assertFalse(owner.succeeded());
-        assertEq(address(owner).balance, 1 ether);
-
-        // After the fill the handler has nothing and the owner recovers the rest.
-        vm.prank(address(script));
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(address(script), 1 ether, "");
-        owner.call(address(order), 0, abi.encodeCall(Order.execute, (address(owner), 1 ether, "")));
-        assertEq(address(owner).balance, 2 ether);
-    }
-
-    /// The owner of an active order cannot reach its authority by making the order fill
-    /// itself, and a closed order cannot be filled at all, by anyone.
-    function test_ownerCannotFillThroughTheOrder() public {
-        Order order = _create(seller, probe, "");
-        bytes memory selfFill = abi.encodeCall(Order.fill, ("", abi.encode(seller, 0, "")));
-        vm.startPrank(seller);
-        vm.expectRevert(Order.Unauthorized.selector);
-        order.execute(address(order), 0, selfFill);
-        order.close();
-        vm.expectRevert(Order.OrderClosed.selector);
-        order.execute(address(order), 0, selfFill);
-        vm.stopPrank();
-    }
-
-    // ---- reentrancy and hostile handlers ----
-
-    function test_fillCannotReenter() public {
-        Order order = _create(seller, new ReentrantHandler(), "");
-        vm.expectRevert(Order.Reentrant.selector);
-        order.fill("", "");
-    }
-
-    function test_handlerCannotKeepAuthority() public {
-        StashHandler stash = new StashHandler();
-        Order order = _create(seller, stash, "");
-        vm.deal(address(order), 1 ether);
-        order.fill("", "");
-        assertEq(address(stash.stashed()), address(order));
-
-        vm.expectRevert(Order.Unauthorized.selector);
-        stash.useLater(attacker, 1 ether, "");
-        assertEq(address(order).balance, 1 ether);
-    }
-
-    /// A hostile handler controls only the orders that chose it. It cannot touch an unrelated
-    /// order's assets, or use approvals granted to that order.
-    function test_hostileHandlerIsContainedToItsOwnOrders() public {
-        DrainHandler drain = new DrainHandler(attacker);
-        Order victimOfOwnChoice = _create(buyer, drain, "");
-        vm.deal(address(victimOfOwnChoice), 3 ether);
-
-        (Order victim,) = _listSale(seller, 1, 1 ether);
-        vm.deal(address(victim), 5 ether);
-        nft.mint(seller, 2);
-        vm.prank(seller);
-        nft.approve(address(victim), 2);
-
-        // Trying to move the unrelated order's NFT fails, so the whole fill reverts.
-        vm.expectRevert(Order.Unauthorized.selector);
-        victimOfOwnChoice.fill("", abi.encode(address(victim), address(nft), 1));
-
-        // Without that, the drain handler takes only its own order's ETH.
-        victimOfOwnChoice.fill("", "");
-        assertEq(attacker.balance, 103 ether);
-        assertEq(address(victim).balance, 5 ether);
-        assertEq(nft.ownerOf(1), address(victim));
-        assertEq(nft.getApproved(2), address(victim));
-    }
-
-    /// A handler pulling from an approval must use `caller`. Approving one order does not let
-    /// any other order, or anyone filling that order, spend it.
-    function test_approvalToOneOrderIsUnusableElsewhere() public {
-        TestToken token = new TestToken("T");
-        token.mint(seller, 100);
-        Order a = _create(seller, probe, "");
-        Order b = _create(seller, probe, "b");
-        vm.prank(seller);
-        token.approve(address(a), 100);
-
-        bytes memory pull = abi.encodeCall(token.transferFrom, (seller, attacker, 100));
-        vm.expectRevert();
-        b.fill("b", abi.encode(address(token), 0, pull));
+    function test_cancelByNonIssuerReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
         vm.prank(attacker);
         vm.expectRevert(Order.Unauthorized.selector);
-        a.execute(address(token), 0, pull);
-        assertEq(token.balanceOf(seller), 100);
+        o.cancel();
     }
 
-    /// A broken handler cannot trap assets: recovery never calls the handler.
-    function test_ownerRecoversFromBrokenHandler() public {
-        TestToken token = new TestToken("T");
-        TestMulti multi = new TestMulti();
-        Order order = _create(seller, new RevertHandler(), "");
-        nft.mint(address(this), 1);
-        nft.safeTransferFrom(address(this), address(order), 1);
-        multi.mint(address(order), 5, 10);
-        token.mint(address(order), 50);
-        vm.deal(address(order), 1 ether);
-
-        vm.startPrank(seller);
-        order.close();
-        order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(order), seller, 1)));
-        order.execute(
-            address(multi), 0, abi.encodeCall(multi.safeTransferFrom, (address(order), seller, 5, 10, ""))
-        );
-        order.execute(address(token), 0, abi.encodeCall(token.transfer, (seller, 50)));
-        order.execute(seller, 1 ether, "");
-        vm.stopPrank();
-
-        assertEq(nft.ownerOf(1), seller);
-        assertEq(multi.balanceOf(seller, 5), 10);
-        assertEq(token.balanceOf(seller), 50);
-        assertEq(seller.balance, 1 ether);
+    function test_cancelAfterDeadlineReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.warp(DL);
+        vm.prank(issuer);
+        vm.expectRevert(Order.DeadlinePassed.selector);
+        o.cancel();
     }
 
-    function test_acceptsEthAndTokenTransfers() public {
-        Order order = _create(seller, probe, "");
-        TestMulti multi = new TestMulti();
-        multi.mint(seller, 1, 2);
-        multi.mint(seller, 2, 2);
-        uint256[] memory ids = new uint256[](2);
-        uint256[] memory amounts = new uint256[](2);
-        (ids[0], ids[1], amounts[0], amounts[1]) = (1, 2, 1, 1);
-        vm.startPrank(seller);
-        multi.safeBatchTransferFrom(seller, address(order), ids, amounts, "");
-        multi.safeTransferFrom(seller, address(order), 1, 1, "");
-        vm.stopPrank();
-        (bool ok,) = address(order).call{value: 1}("");
-        assertTrue(ok);
-        assertEq(multi.balanceOf(address(order), 1), 2);
+    // ===================== deadline boundary =====================
+
+    function test_executeAtDeadlineMinusOneWorks() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.warp(DL - 1);
+        vm.prank(buyer);
+        o.execute(runComplete(true));
+        assertEq(uint8(o.state()), uint8(OrderState.Completed));
     }
 
-    /// An order cannot sign anything. Signature based protocols cannot act through it, so its
-    /// authority exists only inside its own calls.
-    function test_ordersDoNotValidateSignatures() public {
-        Order order = _create(seller, probe, "");
-        (bool ok,) = address(order).call(abi.encodeWithSignature("isValidSignature(bytes32,bytes)", bytes32(0), ""));
-        assertFalse(ok);
+    function test_executeAtDeadlineReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.warp(DL);
+        vm.prank(buyer);
+        vm.expectRevert(Order.DeadlinePassed.selector);
+        o.execute(runComplete(true));
     }
 
-    /// The factory has no function that moves assets: an approval to it is inert.
-    function test_marketHoldsNoAuthority() public {
-        nft.mint(seller, 1);
+    // ===================== finalizeExpiry =====================
+
+    function test_finalizeExpiryPendingByAnyone() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.warp(DL);
+        vm.prank(attacker);
+        o.finalizeExpiry();
+        assertEq(uint8(o.state()), uint8(OrderState.Expired));
+    }
+
+    function test_finalizeExpiryLiveByAnyone() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.warp(DL + 1);
+        vm.prank(attacker);
+        o.finalizeExpiry();
+        assertEq(uint8(o.state()), uint8(OrderState.Expired));
+    }
+
+    function test_finalizeExpiryBeforeDeadlineReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, DL, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(attacker);
+        vm.expectRevert(Order.NotExpired.selector);
+        o.finalizeExpiry();
+    }
+
+    function test_finalizeExpiryPerpetualReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer); // deadline 0
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.warp(T0 + 3650 days);
+        vm.prank(attacker);
+        vm.expectRevert(Order.NotExpired.selector);
+        o.finalizeExpiry();
+    }
+
+    // ===================== release rules =====================
+
+    function test_releaseLiveReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer);
+        o.activate();
+        vm.prank(issuer);
+        vm.expectRevert(Order.WrongState.selector);
+        o.release(issuer, "");
+    }
+
+    function test_releaseZeroRecipientReverts() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT); // Pending
+        vm.prank(issuer);
+        vm.expectRevert(Order.ZeroAddress.selector);
+        o.release(address(0), "");
+    }
+
+    function test_releaseStrangerMustTargetResidual() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT); // Pending, residual == issuer
+
+        // stranger -> stranger: rejected
+        vm.prank(attacker);
+        vm.expectRevert(Order.Unauthorized.selector);
+        o.release(attacker, "");
+
+        // stranger -> residual: allowed (anyone may trigger cleanup to the residual)
+        vm.prank(attacker);
+        o.release(issuer, "");
+    }
+
+    function test_releaseResidualChoosesRecipient() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        vm.prank(issuer);
+        Order o = market.create(spec, SALT);
+        vm.prank(issuer); // residual chooses any recipient
+        o.release(attacker, "");
+    }
+
+    function test_releaseCallCannotCarryValue() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        Order o = _create(issuer, spec, 1 ether); // fund so balance exists
+        // During release, a call carrying ETH is rejected.
+        bytes memory input = encodeRun(oneStep(OP_CALLRAW, attacker, 1, ""), false, false);
+        vm.prank(issuer);
+        vm.expectRevert(Order.Unauthorized.selector);
+        o.release(issuer, input);
+    }
+
+    function test_releaseZeroValueCallWorks() public {
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        Order o = _create(issuer, spec, 1 ether);
+        bytes memory input = encodeRun(oneStep(OP_CALLRAW, attacker, 0, ""), false, false);
+        vm.prank(issuer);
+        o.release(issuer, input); // succeeds
+    }
+
+    // ===================== phase guard (reentrancy) =====================
+
+    function _liveProbe(Admission a) internal returns (Order o) {
+        OrderSpec memory spec = _probeSpec(a, 0, issuer);
+        o = _create(issuer, spec, 1 ether);
+        vm.prank(issuer);
+        o.activate();
+    }
+
+    function test_reentryExecuteReverts() public {
+        Order o = _liveProbe(Admission.Public);
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_RE_EXECUTE, address(0), 0, ""), false, false));
+    }
+
+    function test_reentrySurrenderReverts() public {
+        Order o = _liveProbe(Admission.Public);
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_RE_SURRENDER, address(0), 0, ""), false, false));
+    }
+
+    function test_reentryReleaseReverts() public {
+        Order o = _liveProbe(Admission.Public);
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_RE_RELEASE, issuer, 0, ""), false, false));
+    }
+
+    function test_reentryReleaseCreditReverts() public {
+        Order o = _liveProbe(Admission.Public);
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_RE_RCREDIT, issuer, 0, ""), false, false));
+    }
+
+    function test_reentryWithdrawCreditReverts() public {
+        Order o = _liveProbe(Admission.Public);
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_RE_WCREDIT, issuer, 0, ""), false, false));
+    }
+
+    function test_reentryCancelReverts() public {
+        // cancel checks issuer first, so the reentrant caller must be the issuer.
+        Reenterer re = new Reenterer();
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, address(re));
+        vm.prank(address(re));
+        Order o = market.create(spec, SALT);
+        re.setOrder(o);
+        vm.prank(address(re));
+        o.activate();
+        bytes memory cb = abi.encodeCall(Reenterer.reCancel, ());
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_CALLRAW, address(re), 0, cb), false, false));
+    }
+
+    function test_reentryWithdrawSurplusReverts() public {
+        // withdrawSurplus checks residual first, so the reentrant caller must be the residual.
+        Reenterer re = new Reenterer();
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, address(re));
+        vm.prank(address(re));
+        Order o = market.create(spec, SALT);
+        re.setOrder(o);
+        vm.prank(address(re));
+        o.activate();
+        bytes memory cb = abi.encodeCall(Reenterer.reWithdraw, (attacker));
+        vm.prank(buyer);
+        vm.expectRevert(Order.Busy.selector);
+        o.execute(encodeRun(oneStep(OP_CALLRAW, address(re), 0, cb), false, false));
+    }
+
+    function test_composabilityTwoOrdersOneTx() public {
+        Order a = _liveProbe(Admission.Public);
+        OrderSpec memory spec = _probeSpec(Admission.Public, 0, issuer);
+        Order b = _create(issuer, spec, 0);
+        vm.prank(issuer);
+        b.activate();
+
+        Composer composer = new Composer();
+        composer.execBoth(a, b, runComplete(true), runComplete(true));
+        assertEq(uint8(a.state()), uint8(OrderState.Completed));
+        assertEq(uint8(b.state()), uint8(OrderState.Completed));
+    }
+}
+
+contract InvalidAdmissionTest is Base {
+    function test_invalidAdmissionRejected() public {
+        OrderSpec memory spec = _spec(address(exchange), Admission.Public, 0, seller, hex"01");
+        bytes memory data = abi.encodeCall(Market.create, (spec, bytes32(uint256(1))));
+        // OrderSpec is dynamic: word 0 selector-offset, struct head at 4+64; admission is its 2nd word.
+        uint256 slot = 4 + 64 + 32;
+        assembly {
+            mstore(add(add(data, 0x20), slot), 2)
+        }
         vm.prank(seller);
-        nft.approve(address(market), 1);
-        (bool ok,) = address(market).call(abi.encodeCall(IERC721.transferFrom, (seller, attacker, 1)));
+        (bool ok,) = address(market).call(data);
         assertFalse(ok);
-        assertEq(nft.ownerOf(1), seller);
+        spec.admission = Admission.Holder;
+        vm.prank(seller);
+        (ok,) = address(market).call(abi.encodeCall(Market.create, (spec, bytes32(uint256(1)))));
+        assertTrue(ok);
     }
 }
