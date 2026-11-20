@@ -17,9 +17,9 @@ import {FeeConfig} from "./FeeConfig.sol";
 ///
 /// Money terms, for both sides: `price` is all the buyer spends. `fee` is the rate the order
 /// snapshotted at activation, at most its `maxFeeBps`, rounded down, paid to the fee recipient
-/// current at execution. `royalty` is the collection's ERC2981 answer for the price; a reverting
-/// lookup, a royalty with no receiver, or a royalty that with the fee exceeds the price reverts.
-/// `proceeds = price - fee - royalty`. Settlement, refunds and delivery are immediate and
+/// current at execution. `royalty` is the collection's ERC2981 answer for the price, capped at
+/// `price - fee` so a large royalty cannot block trading; a reverting lookup or a royalty with no
+/// receiver reverts. `proceeds = price - fee - royalty`. Settlement, refunds and delivery are immediate and
 /// atomic with the execution.
 ///
 /// Sale: the order holds one token before activation and completes on delivery. Input
@@ -110,7 +110,6 @@ contract ExchangeAction is ActionBase {
     error AboveMaxPrice(uint256 price, uint256 maxPrice);
     error Underpaid(uint256 price, uint256 value);
     error RoyaltyAboveLimit(uint256 royalty, uint256 limit);
-    error RoyaltyExceedsPrice(uint256 royalty, uint256 fee, uint256 price);
     error BadRoyalty();
     error WrongToken(uint256 tokenId);
     error BelowMinProceeds(uint256 proceeds, uint256 minProceeds);
@@ -265,7 +264,7 @@ contract ExchangeAction is ActionBase {
         q.fee = q.price * bps / 10_000;
         q.feeTo = fees.recipient();
         (q.royaltyTo, q.royalty) = royaltyOf(c.nft, tokenId, q.price);
-        if (q.royalty > q.price - q.fee) revert RoyaltyExceedsPrice(q.royalty, q.fee, q.price);
+        if (q.royalty > q.price - q.fee) q.royalty = q.price - q.fee;
         q.proceeds = q.price - q.fee - q.royalty;
     }
 
