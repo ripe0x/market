@@ -37,7 +37,7 @@ A Holder order whose token owner may buy one escrowed ordinary NFT at a fixed pr
 
 `Config { IERC721 nft; uint256 tokenId; uint256 price; address proceedsTo; uint16 maxRoyaltyBps; }`
 
-Activation snapshots `(royaltyTo, royalty)` from ERC2981 for `price`, within `maxRoyaltyBps`. Execution input `abi.encode(address recipient)` with exactly `price` ETH: delivers the NFT, credits the royalty and `price - royalty` to `proceedsTo`, completes and burns the token. No trading fee. A zero price is allowed. Surrender and expiry charge no royalty; the residual recovers the NFT with `release`. An issuer that holds or buys back the token can surrender and recover its collateral. Address checks do not establish beneficial ownership.
+Activation snapshots `(royaltyTo, royalty)` from ERC2981 for `price`, within `maxRoyaltyBps`. Execution input `abi.encode(address recipient)` with exactly `price` ETH: delivers the NFT, credits the royalty and `price - royalty` to `proceedsTo`, completes and burns the token. No trading fee. A zero price is allowed. Surrender and expiry charge no royalty; the residual recovers the NFT with `release`. An issuer that holds or buys back the token can surrender and recover its collateral. Address checks do not establish beneficial ownership. An Actions token escrowed by mistake is rejected at activation and is recoverable only while its own order stays live; afterwards it cannot move and stays in the order.
 
 ## ReservedAction and IReservedActionTarget
 
