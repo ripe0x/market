@@ -1,5 +1,41 @@
 # Status
 
+## Mainnet readiness, 2026-11-25
+
+Protocol PRs #17 and #18 merged to `main` (merge commit `c671b3c`); client PRs #7 and #8 merged to client `main` (`eddca79`). Production bytecode unchanged from `45492b9`.
+
+| Check at `main` | Command | Result |
+| --- | --- | --- |
+| Read-only mainnet dry run | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co --sender 0xCB43078C32423F5348Cab5885911C3B5faE217F9` | Exit 0. Same nine addresses as the candidate table. Estimated 14,341,828 gas, about 0.0165 ETH at a 0.57 gwei base fee. No signer, no broadcast. |
+| Mainnet-fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Exit 0 at fork block 26,493,718: `Deploy.run()` and `examples()` from Anvil's unlocked account, then the lifecycle simulation. Acquire payer spent exactly 6 ETH (1 premium + 5 exercise price; 1 ETH excess refunded). |
+
+Environment finding: the first fork rehearsal failed `exact spend`. The lifecycle script's actors were `vm.addr(1..9)`, whose private keys are public; on mainnet all nine carry an EIP-7702 delegation (`0xef0100` + `8a67b5…`) that forwards received ETH, so the correct 1 ETH refund was swept. The script now derives actors from unheld keys and requires each to have no code. No fork test uses small-key actors. This is the documented behavior that an ETH transfer calls the receiver's code, not a protocol defect.
+
+### Sepolia deployment, 2026-11-25
+
+Owner ran `Deploy.run()` from `main` with `--account ripe0x` (signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`). All nine addresses match the candidate table. Seven transactions, all status 1, blocks 12,211,383 to 12,211,389, 69,373,499 gas, 0.0386 Sepolia ETH. Market tx `0x68fd0350a526476ec45453f7daf29d9ff375c943096ae2a149656538ff1fa0e6` (27,540,377 gas). Not submitted to Etherscan or Sourcify.
+
+Readback from chain: runtime sizes Market 2,047, Order implementation 7,409, Actions 7,803, FeeConfig 924, ExchangeAction 10,155, CoveredNFTPurchase 5,131, ReservedAction 4,329, AcquireAndExecute 4,468, FillVerifier 1,058 bytes. `Market.implementation()` and `actions()`, `Actions.market()`, the implementation's `market()` and `actions()`, each action's `market()`, `ExchangeAction.fees()` and `actions()`, and `AcquireAndExecute.market()`, `actions()`, `exchange()`, `covered()` all point at the table addresses. `FeeConfig` admin `0xCB43…17F9`, recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72`, `feeBps` 100.
+
+Gas finding: Sepolia now prices state creation far above mainnet. Node estimates: Market deployment 27,979,862 gas on Sepolia versus 3,986,414 on mainnet; an empty contract 214,117 versus 54,469; about 1,557 versus 200 gas per byte of deployed code. Forge simulates with local rules, so the first broadcast (tx `0x55dab960bb0c8744bd95d73d7b1ab482d3e11b475fb0da2e614426ecf3eb0d6f`, gas limit 5,735,671) reverted, created nothing and cost 0.000052 ETH; the rerun used `-g 900`. The node does not expose `eth_config`, so the fork name is unconfirmed. If mainnet adopts this pricing, each order (one new clone) costs several hundred thousand more gas and the 14,341,828-gas mainnet estimate no longer holds; re-estimate with the mainnet node before deploying.
+
+### Listing recovery at every step and D512, 2026-11-25
+
+The client lists in three transactions (create, deposit, activate). Stopping after any of them, the residual (the seller) recovers the NFT with `release`: in Pending with or without `cancel`, before or after the deadline, after a rejected activation, and after a deposit into an already canceled order. A Live listing past its deadline needs `finalizeExpiry` (anyone) before `release`. Strangers cannot release.
+
+Before D512, the two-transaction alternative (deposit to the predicted address, then `createAndActivate`) stranded the NFT permanently when the deadline passed first, because `create` rejected the expired spec and the address could never get code. D512 removes that check; the test now creates the late order and releases the NFT, and a stranger's late `create` lands at a different address. Losing the exact spec or salt still strands pre-sent backing; that is a frontend responsibility.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Changed and dependent suites | `forge test --match-path "test/{Core,ListingRecovery,Exchange,Covered,Credits,Reserved,Smoke}.t.sol"`, `test/review/*`, `test/{FillVerifier,Acquire,ActionsToken}.t.sol`, `test/{BidApproval,Invariant,Gas}.t.sol --isolate` | All passed. ListingRecovery 13, Core 46. Gas snapshot: create 122 gas cheaper. |
+| New addresses | `forge script script/Deploy.s.sol` | Seven addresses changed (DEPLOYMENT.md); FeeConfig and FillVerifier unchanged. Market runtime 1,964 bytes. |
+
+Independent review of `ee75358` (read-only, real-contract scratch tests for Covered and Reserved recovery): no high or medium findings; born-expired orders never go live, never mint an Actions token, and cannot consume a reservation. It corrected the code comment, which had overstated the guarantee.
+
+Not run for D512: whole suite with `CANDIDATE_RUN=1`, mainnet fork tests, client manifests regenerated, Sepolia redeploy.
+
+Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia real-transaction lifecycle with indexer, web and a real wallet, mainnet deployment and canary.
+
 ## Unified action candidate, 2026-11-19
 
 **Experimental, unaudited, undeployed.** Production source frozen at `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7` (branch `claude/unified-actions`, based on PR #17 head `0e8832c`). Later commits on the branch change only documentation. Design: [SPEC](SPEC.md), [ACTIONS](ACTIONS.md), decisions D501–D511.
