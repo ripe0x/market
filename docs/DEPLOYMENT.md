@@ -14,14 +14,14 @@ Frozen production source: `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7`. Salt `kecc
 
 | Contract | Computed address | keccak of compiler runtime (immutables unfilled) |
 | --- | --- | --- |
-| Market | `0xf5e008cf1920968D3AFF96e880652094E94dEa17` | `0x3014680da3a61cbcc498489a9cde412f4876b101f365372d8d3f999a67c01cbe` |
-| Order implementation (created by Market) | `0x796bBB506D68a60Eb69906D955ebEa417Bb7C54e` | `0x58bbe8625a478a3c0f9290bff9d0731631de87a7d2e62272f788fdd34fe7c6c4` |
-| Actions (created by Market) | `0xB874499547D387AB67CA1b26d52f5cE22f8e700c` | `0xb4197ee1d171eb2fefc005fcb276989aaec18ee8da3ef4a847f075c78f3b8634` |
+| Market | `0x54c0c040d5197FEdE18fDc5A0De5196956553113` | `0x5584fada1c628bae192c9e363ac2ef67fd82285340e2dc068241e7563cbad5da` |
+| Order implementation (created by Market) | `0x17743de18585b9C52f2493751420e3a30a867034` | `0x58bbe8625a478a3c0f9290bff9d0731631de87a7d2e62272f788fdd34fe7c6c4` |
+| Actions (created by Market) | `0xa51f16052f65684c2460e78D364C19fAEF090b55` | `0xb4197ee1d171eb2fefc005fcb276989aaec18ee8da3ef4a847f075c78f3b8634` |
 | FeeConfig | `0xab7494a3Af234eEFC55C6de6D824A9c1ffc7B179` | `0xb22a316734ba058e071db380bef6d9da389f8ebbf771f14341eb65f7853fa3dd` |
-| ExchangeAction | `0x8D0eFf8Cc4d4B51E8c83fa23D33aDaDA0c2da64D` | `0xf7b68e1576d2f193dc3d489f32ad312fdd8a989fd06a9ef6e512ca299dd5001e` |
-| CoveredNFTPurchase | `0xcEF30179B9873e327B63E24F6715424E6552A6f6` | `0x5cc21b74855961c3b53daec9e25840c08e023265bd5f1fc3464750f4883a1afb` |
-| ReservedAction | `0x65dD4465cdd699125a4A32DEBf1e7f85bab65fF8` | `0x30418a3b1a8372ced164a0d4cce0af66efd4173b8bcb65b15241566af411d4d5` |
-| AcquireAndExecute | `0x819681722611BfE476129A93CC96FCCddE68F8a4` | `0xfe28e952cda3624f49b1511e632cd866034f8b7845718e340809f5f90062ee4d` |
+| ExchangeAction | `0x9Af710E45D873d82920056044D4cb165A213A9E9` | `0xf7b68e1576d2f193dc3d489f32ad312fdd8a989fd06a9ef6e512ca299dd5001e` |
+| CoveredNFTPurchase | `0x73416c9c0eD2F1e3c4dE1796fDdc10F46E10f027` | `0x5cc21b74855961c3b53daec9e25840c08e023265bd5f1fc3464750f4883a1afb` |
+| ReservedAction | `0x7d7b12c86AcE74756F80134d71196a840a6bF88c` | `0x30418a3b1a8372ced164a0d4cce0af66efd4173b8bcb65b15241566af411d4d5` |
+| AcquireAndExecute | `0xecdf2023D9EF0a4177d3a565360156103529439a` | `0xfe28e952cda3624f49b1511e632cd866034f8b7845718e340809f5f90062ee4d` |
 | FillVerifier | `0x255445e486aFe67a7265470cfA802f0EcFb8c07B` | `0x5c467510a657e1ae31365a293d1afc917aaa5a7e5fc5d2315c3160015d37734b` |
 
 Contracts with immutables have different onchain code hashes; the client generates those from a deployed local instance. `script/rehearse.sh` deploys the set and runs `script/ActionsLifecycle.s.sol` on a throwaway local Anvil. The earlier rights candidate and order-only tables below are historical.

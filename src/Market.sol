@@ -32,8 +32,9 @@ contract Market {
     /// @notice Deploy a Pending order issued by the caller. Any ETH sent funds the order. A
     /// config too long for a clone's code reverts with Clones.CloneArgumentsTooLong.
     /// @dev A deadline already passed is accepted: the order can never activate, but backing sent
-    /// to its predicted address ahead of time stays recoverable through `release`. Every check
-    /// here must stay independent of time and chain state for the same reason.
+    /// to its predicted address ahead of time stays recoverable through `release`. No check here
+    /// may depend on time for the same reason. The address commits the action's code hash, so an
+    /// action whose code can change moves its predicted addresses.
     function create(OrderSpec calldata spec, bytes32 salt) public payable returns (Order order) {
         if (spec.residual == address(0)) revert ZeroResidual();
         _checkAction(spec.action);

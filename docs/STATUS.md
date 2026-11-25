@@ -30,6 +30,8 @@ Before D512, the two-transaction alternative (deposit to the predicted address, 
 | Changed and dependent suites | `forge test --match-path "test/{Core,ListingRecovery,Exchange,Covered,Credits,Reserved,Smoke}.t.sol"`, `test/review/*`, `test/{FillVerifier,Acquire,ActionsToken}.t.sol`, `test/{BidApproval,Invariant,Gas}.t.sol --isolate` | All passed. ListingRecovery 13, Core 46. Gas snapshot: create 122 gas cheaper. |
 | New addresses | `forge script script/Deploy.s.sol` | Seven addresses changed (DEPLOYMENT.md); FeeConfig and FillVerifier unchanged. Market runtime 1,964 bytes. |
 
+Independent review of `ee75358` (read-only, real-contract scratch tests for Covered and Reserved recovery): no high or medium findings; born-expired orders never go live, never mint an Actions token, and cannot consume a reservation. It corrected the code comment, which had overstated the guarantee.
+
 Not run for D512: whole suite with `CANDIDATE_RUN=1`, mainnet fork tests, client manifests regenerated, Sepolia redeploy.
 
 Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia real-transaction lifecycle with indexer, web and a real wallet, mainnet deployment and canary.
