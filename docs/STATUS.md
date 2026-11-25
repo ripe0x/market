@@ -1,5 +1,18 @@
 # Status
 
+## Mainnet readiness, 2026-11-25
+
+Protocol PRs #17 and #18 merged to `main` (merge commit `c671b3c`); client PRs #7 and #8 merged to client `main` (`eddca79`). Production bytecode unchanged from `45492b9`.
+
+| Check at `main` | Command | Result |
+| --- | --- | --- |
+| Read-only mainnet dry run | `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co --sender 0xCB43078C32423F5348Cab5885911C3B5faE217F9` | Exit 0. Same nine addresses as the candidate table. Estimated 14,341,828 gas, about 0.0165 ETH at a 0.57 gwei base fee. No signer, no broadcast. |
+| Mainnet-fork rehearsal | `script/rehearse.sh https://mainnet.gateway.tenderly.co` | Exit 0 at fork block 26,493,718: `Deploy.run()` and `examples()` from Anvil's unlocked account, then the lifecycle simulation. Acquire payer spent exactly 6 ETH (1 premium + 5 exercise price; 1 ETH excess refunded). |
+
+Environment finding: the first fork rehearsal failed `exact spend`. The lifecycle script's actors were `vm.addr(1..9)`, whose private keys are public; on mainnet all nine carry an EIP-7702 delegation (`0xef0100` + `8a67b5…`) that forwards received ETH, so the correct 1 ETH refund was swept. The script now derives actors from unheld keys and requires each to have no code. No fork test uses small-key actors. This is the documented behavior that an ETH transfer calls the receiver's code, not a protocol defect.
+
+Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia deployment with real transactions, mainnet deployment and canary.
+
 ## Unified action candidate, 2026-11-19
 
 **Experimental, unaudited, undeployed.** Production source frozen at `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7` (branch `claude/unified-actions`, based on PR #17 head `0e8832c`). Later commits on the branch change only documentation. Design: [SPEC](SPEC.md), [ACTIONS](ACTIONS.md), decisions D501–D511.

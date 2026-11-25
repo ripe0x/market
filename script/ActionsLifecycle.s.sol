@@ -35,20 +35,29 @@ contract ActionsLifecycle is Script {
     TestNFT nft;
     RoyaltyNFT rnft;
 
-    address seller = vm.addr(1);
-    address buyer = vm.addr(2);
-    address bidder = vm.addr(3);
-    address issuer = vm.addr(4);
-    address artist = vm.addr(5);
-    address treasury = vm.addr(6);
-    address feeAdmin = vm.addr(7);
-    address royaltyRx = vm.addr(8);
-    address payer = vm.addr(9);
+    address seller = _actor("seller");
+    address buyer = _actor("buyer");
+    address bidder = _actor("bidder");
+    address issuer = _actor("issuer");
+    address artist = _actor("artist");
+    address treasury = _actor("treasury");
+    address feeAdmin = _actor("feeAdmin");
+    address royaltyRx = _actor("royaltyRx");
+    address payer = _actor("payer");
 
     uint256 salt;
     uint256 nextId = 1;
 
+    /// Actors from private keys nobody holds. Small keys such as 1..9 are public, and on mainnet
+    /// their addresses carry EIP-7702 sweeper delegations that forward any ETH they receive, which
+    /// would corrupt balance checks on a fork. `run` requires every actor to have no code.
+    function _actor(string memory label) internal pure returns (address) {
+        return vm.addr(uint256(keccak256(abi.encodePacked("market.lifecycle.", label))));
+    }
+
     function run() external {
+        address[9] memory all = [seller, buyer, bidder, issuer, artist, treasury, feeAdmin, royaltyRx, payer];
+        for (uint256 i; i < all.length; ++i) require(all[i].code.length == 0, "actor has code");
         vm.warp(1_000_000);
         market = new Market();
         actions = market.actions();
