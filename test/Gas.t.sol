@@ -1,102 +1,67 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {Order} from "../src/Order.sol";
-import {NFTBid} from "../handlers/NFTBid.sol";
-import {NFTSale} from "../handlers/NFTSale.sol";
-import {NFTTrade} from "../handlers/NFTTrade.sol";
-import {Artwork} from "../examples/Artwork.sol";
-import {PaintAction} from "../examples/PaintAction.sol";
 import {Base} from "./utils/Base.sol";
-import {RoyaltyNFT} from "./utils/Mocks.sol";
+import {Admission, Order, OrderSpec} from "../src/Order.sol";
 
-/// Records gas for creation and common fills in `snapshots/GasTest.json`.
-/// Run with `forge test --match-path test/Gas.t.sol --isolate` so each call starts cold.
+/// Deterministic gas snapshots for the main Order/ExchangeAction/CoveredNFTPurchase operations.
+/// Run with `--isolate` to refresh snapshots/GasTest.json.
 contract GasTest is Base {
-    RoyaltyNFT art;
-
-    function setUp() public override {
-        super.setUp();
-        art = new RoyaltyNFT();
-        art.setRoyalty(royalty, 500);
-        // The fee recipient is an existing account (a Safe) in production, so the first fee does
-        // not pay the 25,000 gas of creating it.
-        vm.deal(treasury, 1 ether);
-    }
-
-    function test_gasNFTSale() public {
-        art.mint(seller, 1);
-        NFTTrade.Schedule memory s = NFTTrade.Schedule(10 ether, 1 ether, block.timestamp, block.timestamp + 1000, 0);
-        bytes memory config = abi.encode(NFTSale.Config(art, 1, s, seller, 1000));
+    function test_gas_lifecycle() public {
+        // ---- sale: create + activate (NFT pre-positioned at the predicted address) ----
+        uint256 price = 1 ether;
+        bytes32 sSalt = keccak256("gas-sale");
+        OrderSpec memory saleSpec =
+            _spec(address(exchange), Admission.Public, 0, seller, _saleConfig(address(nft), 1, _fixed(price), seller, 10_000));
+        address salePred = market.orderAddress(seller, saleSpec, sSalt);
+        nft.mint(salePred, 1);
         vm.prank(seller);
-        Order order = market.create(sale, config, 0);
-        vm.snapshotGasLastCall("create: NFTSale order");
-        vm.prank(seller);
-        art.transferFrom(seller, address(order), 1);
-        skip(300);
-        vm.prank(buyer);
-        order.fill{value: 10 ether}(config, abi.encode(buyer, 10 ether));
-        vm.snapshotGasLastCall("fill: NFTSale, falling price, royalty, refund");
-    }
+        Order sale = market.createAndActivate(saleSpec, sSalt);
+        vm.snapshotGasLastCall("create+activate sale");
 
-    function test_gasNFTSaleNoRoyalty() public {
-        (Order order, bytes memory config) = _listSale(seller, 1, 1 ether);
+        // ---- sale: execute ----
         vm.prank(buyer);
-        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
-        vm.snapshotGasLastCall("fill: NFTSale, fixed price, no royalty, exact");
-    }
+        sale.execute{value: price}(abi.encode(buyer, price, uint64(0)));
+        vm.snapshotGasLastCall("sale execute");
 
-    /// An order created before a rate change looks up its rate: one more call and two reads.
-    function test_gasNFTSaleAfterRateChange() public {
-        (Order order, bytes memory config) = _listSale(seller, 1, 1 ether);
-        vm.prank(feeAdmin);
-        fees.setFee(50);
-        skip(1);
-        vm.prank(buyer);
-        order.fill{value: 1 ether}(config, abi.encode(buyer, 1 ether));
-        vm.snapshotGasLastCall("fill: NFTSale, fixed price, no royalty, after a rate change");
-    }
+        // ---- bid: create (funded, pending) ----
+        bytes32 bSalt = keccak256("gas-bid");
+        OrderSpec memory bidSpec =
+            _spec(address(exchange), Admission.Public, 0, bidder, _bidConfig(address(nft), true, 0, _fixed(2 ether), bidder, 1, 0));
+        vm.prank(bidder);
+        Order bid = market.create{value: 2 ether}(bidSpec, bSalt);
+        vm.snapshotGasLastCall("bid create");
+        _activate(bid);
 
-    function test_gasNFTBid() public {
-        NFTTrade.Schedule memory s = NFTTrade.Schedule(1 ether, 2 ether, block.timestamp, block.timestamp + 1000, 0);
-        bytes memory config = abi.encode(NFTBid.Config(art, true, 0, s, royalty, 2));
-        vm.deal(seller, 4 ether);
-        vm.prank(seller);
-        Order bid = market.create{value: 4 ether}(bids, config, 0);
-        vm.snapshotGasLastCall("create: NFTBid order, funded");
-        art.mint(buyer, 1);
-        art.mint(buyer, 2);
-        vm.prank(buyer);
-        art.setApprovalForAll(address(bids), true);
-        skip(100);
-        vm.prank(buyer);
-        bid.fill(config, abi.encode(1, 0, buyer));
-        vm.snapshotGasLastCall("fill: NFTBid, rising collection bid, royalty");
-        vm.prank(buyer);
-        bid.fill(config, abi.encode(2, 0, buyer));
-        vm.snapshotGasLastCall("fill: NFTBid, last fill closes");
-    }
+        // ---- bid: execute ----
+        nft.mint(seller, 2);
+        vm.startPrank(seller);
+        nft.approve(address(exchange), 2);
+        bid.execute(abi.encode(uint256(2), uint256(0), seller));
+        vm.snapshotGasLastCall("bid execute");
+        vm.stopPrank();
 
-    function test_gasRecover() public {
-        (Order order,) = _listSale(seller, 1, 1 ether);
-        vm.prank(seller);
-        order.close();
-        vm.snapshotGasLastCall("close");
-        vm.prank(seller);
-        order.execute(address(nft), 0, abi.encodeCall(IERC721.transferFrom, (address(order), seller, 1)));
-        vm.snapshotGasLastCall("execute: owner withdraws NFT");
-    }
+        // ---- covered: issue (create + escrow + activate; the activate is the measured issuance) ----
+        nft.mint(issuer, 3);
+        bytes32 cSalt = keccak256("gas-covered");
+        OrderSpec memory covSpec = _spec(
+            address(covered), Admission.Holder, uint64(T0 + 10 days), issuer, _coveredConfig(address(nft), 3, 3 ether, issuer, 10_000)
+        );
+        vm.prank(issuer);
+        Order cov = market.create(covSpec, cSalt);
+        vm.prank(issuer);
+        nft.transferFrom(issuer, address(cov), 3);
+        vm.prank(issuer);
+        cov.activate();
+        vm.snapshotGasLastCall("covered issue");
 
-    function test_gasPaintAction() public {
-        Artwork artwork = new Artwork(market);
-        artwork.mint(seller, 1);
-        bytes memory config = abi.encode(PaintAction.Config(artwork, 1, type(uint256).max, 0.1 ether, seller));
-        Order order = _create(seller, paint, config);
-        vm.prank(seller);
-        artwork.setPainter(1, address(order));
-        vm.prank(buyer);
-        order.fill{value: 0.1 ether}(config, abi.encode(uint8(5)));
-        vm.snapshotGasLastCall("fill: PaintAction, paint + resign + close");
+        // ---- covered: execute ----
+        vm.prank(issuer);
+        cov.execute{value: 3 ether}(abi.encode(issuer));
+        vm.snapshotGasLastCall("covered execute");
+
+        // ---- credit withdrawal ----
+        cov.releaseCredit(issuer);
+        vm.snapshotGasLastCall("credit withdrawal");
     }
 }

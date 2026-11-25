@@ -27,5 +27,13 @@ runs = 128
 depth = 64
 fail_on_revert = false
 
+# Heavy campaign for test/Invariant.t.sol: `FOUNDRY_PROFILE=invariant forge test --match-path
+# test/Invariant.t.sol`. The handler only makes valid-by-construction calls, so a revert is a
+# real defect: fail_on_revert is on.
+[profile.invariant.invariant]
+runs = 1000
+depth = 128
+fail_on_revert = true
+
 [lint]
 lint_on_build = false
