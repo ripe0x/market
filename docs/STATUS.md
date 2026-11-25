@@ -19,6 +19,10 @@ Readback from chain: runtime sizes Market 2,047, Order implementation 7,409, Act
 
 Gas finding: Sepolia now prices state creation far above mainnet. Node estimates: Market deployment 27,979,862 gas on Sepolia versus 3,986,414 on mainnet; an empty contract 214,117 versus 54,469; about 1,557 versus 200 gas per byte of deployed code. Forge simulates with local rules, so the first broadcast (tx `0x55dab960bb0c8744bd95d73d7b1ab482d3e11b475fb0da2e614426ecf3eb0d6f`, gas limit 5,735,671) reverted, created nothing and cost 0.000052 ETH; the rerun used `-g 900`. The node does not expose `eth_config`, so the fork name is unconfirmed. If mainnet adopts this pricing, each order (one new clone) costs several hundred thousand more gas and the 14,341,828-gas mainnet estimate no longer holds; re-estimate with the mainnet node before deploying.
 
+### Listing recovery at every step, 2026-11-25
+
+`forge test --match-path test/ListingRecovery.t.sol`: 12 passed. The client lists in three transactions (create, deposit, activate). Stopping after any of them, the residual (the seller) recovers the NFT with `release`: in Pending with or without `cancel`, before or after the deadline, after a rejected activation, and after a deposit into an already canceled order. A Live listing past its deadline needs `finalizeExpiry` (anyone) before `release`. Strangers cannot release. The two-transaction alternative (deposit to the predicted address, then `createAndActivate`) strands the NFT permanently if the deadline passes first, because `create` rejects an expired spec and the address can never get code; it is also lost if the exact spec or salt is lost. Rejected.
+
 Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia real-transaction lifecycle with indexer, web and a real wallet, mainnet deployment and canary.
 
 ## Unified action candidate, 2026-11-19
