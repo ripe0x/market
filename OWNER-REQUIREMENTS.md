@@ -85,3 +85,11 @@ No exact gas, premium, exercise price, royalty rate, deadline length or release 
 O18 applies after activation. A rejected Pending setup has no right token; its configured residual beneficiary still controls recovery after issuer cancellation or deadline finalization. An issuer must inspect the residual address before depositing collateral into any pending account.
 
 The historical O9 gas measurements do not apply to the right-enabled bytecode. D409 and [STATUS.md](docs/STATUS.md) record the current measured costs; O1–O5 payment destinations and the 1% NFT trading fee remain unchanged.
+
+## Approved focused improvements, 2026-11-18
+
+R22. Authenticate Artwork reservations through its configured immutable Market before supplied getters; preserve active reservations through transfer and exercise.
+R23. Remove everMinted and its getter with no replacement historical storage.
+R24. Preserve premium/exercise separation, zero strike, exact payment, activation royalty and issuer-only covered activation residual. A 1 eth premium/zero strike pays zero underlying royalty; a one wei strike can round royalty to zero; zero premium/full strike pays zero premium trading fee.
+R25. Enforce independent listing/right eligibility, correct expired escrow cleanup in Positions, and exact-byte authenticated terminal manual recovery without rewriting the core residual authority.
+R26. Regenerate artifacts after final source/comments; public deployment, merges and production cutover require separate authorization.

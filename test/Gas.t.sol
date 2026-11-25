@@ -89,7 +89,7 @@ contract GasTest is Base {
     }
 
     function test_gasPaintAction() public {
-        Artwork artwork = new Artwork();
+        Artwork artwork = new Artwork(market);
         artwork.mint(seller, 1);
         bytes memory config = abi.encode(PaintAction.Config(artwork, 1, type(uint256).max, 0.1 ether, seller));
         Order order = _create(seller, paint, config);

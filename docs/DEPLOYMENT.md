@@ -10,9 +10,58 @@
 
 ## Transferable rights candidate addresses
 
+Current compiled source: `cf7f48d8fae716740c59f882dcc2761497c2a63b`. All addresses below are computed candidates and remain undeployed publicly. The client rights manifests contain their runtime hashes and relationships; Sepolia startBlock is null.
+
+| Contract | Current computed candidate |
+| --- | --- |
+| market | `0x5796242872BCAA3Fb0e16a4388c70f2e80aB966c` |
+| orderImplementation | `0xaCbCDc61A784784a6290cFD03B4bE69276D25DE2` |
+| rightImplementation | `0x6fBf0eB3B39e5841c5a42B78419585d079413C27` |
+| rights | `0x342589F108327aF8809D02F52304852BF6C76382` |
+| feeConfig | `0x89Af00fB84a9352408B8249e9cb8438533751783` |
+| nftSale | `0x14EBFFd2Df1BF321dD782fE41D1c436805A6b7ad` |
+| nftBid | `0xB2A1649B4DFD9f02cdc8bFEdeAa45a33F8b5C8e5` |
+| coveredNFTPurchase | `0xE0eF13aD270d514580D01cEd6f5716A3D7B8B569` |
+| fillVerifier | `0x84042d827d30DB1eF9cE21477ebb6c83CDB04430` |
+
+### Superseded metadata-only candidate, 2026-11-17
+
 The new `Market` creates an `Order` implementation, a `Right` implementation and canonical `Rights` ERC721. The supported deployment script also creates `CoveredNFTPurchase`, updated `NFTSale` and `NFTBid`, `FeeConfig` and `FillVerifier`; its `examples()` path adds `PaintAction` and `ReservedPaint`. **No redesigned address is deployed on Sepolia or mainnet.** Run `forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co` without `--broadcast` to calculate candidate addresses only after the final bytecode is frozen. The result may change with any source or compiler input change; do not use the old table as an address source.
 
 `Market.rights()` and `Market.rightImplementation()` identify the canonical token and backing implementation. `Market.rightAddress(issuer, handler, configHash, deadline, residual, salt)` predicts an individual backing account; verify `Market.isRight(account)` before relying on it. `Rights.accountOf(tokenId)` authenticates a Market-created account. Each right publishes its config in `RightCreated`; its activation terms, deadline, state and residual beneficiary can be read from the account.
+
+The previous metadata-only bytecode had these **superseded, computed, undeployed** candidate addresses. The client manifest records the exact source pin, runtime hashes and relationships. A documentation-only commit does not change these addresses.
+
+| Contract | Computed candidate |
+| --- | --- |
+| market | `0x2EEd41b789fC4D812fB7d2b19a40FF21851Ada95` |
+| orderImplementation | `0x5c6faF50236c460849314c302198Ed382E65f6Ee` |
+| rightImplementation | `0x038E2C2b4448021525dd3EB0e3385b447e43e4e5` |
+| rights | `0x7d3AB35412fF49921A60eAf921a1f6A3c5F83b5b` |
+| feeConfig | `0xa4c8dC554170d3016aeC36441F5F465BbAb816B0` |
+| nftSale | `0x60C4c83bB2EAdd73D2669dC180587FB4e4a9393C` |
+| nftBid | `0xea19021Fd9d418874e146C1dA167C234D08f33f4` |
+| coveredNFTPurchase | `0xe9f8bf0e002Ef25dCa9c5490186191aB93E2184c` |
+| fillVerifier | `0x9e301ffeE4900D6e1436911c0eD5bDd6DF0499C0` |
+
+### Rights candidate: Sepolia preparation and release gate
+
+The current production source is frozen at `cf7f48d8fae716740c59f882dcc2761497c2a63b`, superseding metadata-only source `91b22d3`. The client pins the final protocol revision in `contracts/market` and records its exact commit, resulting addresses and runtime hashes in `deployments/rights-sepolia.json`. That manifest is a **candidate** with `startBlock: null`; its addresses are calculations, not a claim that code exists on Sepolia. `deployments/legacy-sepolia.json` remains the verified order-only production release at block 12,150,229. The client defaults to legacy on public Sepolia; selecting `rights-v1` does not make the candidate live. Regenerate the rights manifests only from the frozen source and inspect the diff; generation starts a private Anvil, not a public transaction.
+
+1. Freeze the source and client revision. Verify the submodule points to the intended protocol commit, compiler settings, planned CREATE2 addresses, fee admin and recipient. Run the client `pnpm --filter @market/protocol gen`, then compare its rights manifests with the simulated deployment output. Never rewrite the legacy manifest from the new build.
+2. Rehearse the *same* `Deploy.run()` path on a disposable local Sepolia fork. Check chain endpoint, the `ripe0x` signer identity, existing code at each predicted address, decoded constructor arguments, gas funding, receipts and post-state. Run a separate signer-specific Sepolia dry run after the build is warm, with no broadcast:
+
+   ```bash
+   forge script script/Deploy.s.sol:Deploy --sig 'run()' \
+     --rpc-url https://sepolia.gateway.tenderly.co --account ripe0x
+   ```
+
+3. Compare the dry run to the candidate manifest. Confirm every predicted runtime code hash and relationship: `Market.implementation`, `Market.rightImplementation`, `Market.rights`, `Rights.market`, the Right implementation's Market/Rights bindings, `CoveredNFTPurchase.market`, `FeeConfig.market`, and each trading handler's `fees` and canonical rights collection. Confirm fee rate, fee recipient and admin. A partial deployment requires receipt and nonce reconciliation before any continuation.
+4. **Stop for explicit owner authorization immediately before each public broadcast.** Present the actual target, Sepolia chain, `ripe0x` signer, decoded deployment actions, native value, gas estimate and consequence. The authorized broadcast would use the same script and signer with `--broadcast --slow --verify`; no such command has run for rights. After each receipt, read code hashes and relationships from chain and record transaction hashes, block numbers and gas. A failed verification service is separate from transaction success.
+5. Only after those readbacks, set `deployments/rights-sepolia.json` to `status: "deployed"` with the actual Market deployment block. Start the rights indexer with `PONDER_RELEASE_ID=rights-v1`, `PONDER_CHAIN_ID=11155111`, an isolated `DATABASE_SCHEMA=market_rights_v1`, and the Tenderly public Sepolia RPC. Wait for `/api/status` to report the exact `deploymentId`, `releaseId`, chain ID, ready state and indexed head; verify right events and token ownership against chain. Keep the legacy indexer and `market_v1` schema intact.
+6. Select the rights release in a separate web deployment using `NEXT_PUBLIC_MARKET_RELEASE=rights-v1` and `NEXT_PUBLIC_CHAIN_ID=11155111`, pointing to the isolated rights indexer. Verify the UI's runtime hash guard and a signed user walkthrough: issue and activate a covered right, list, buy, resell, exercise, release credits; cancel a separate listing, expire and recover another right. Inspect token and backing ownership, deadlines, ETH splits and receipts at each step. Preserve a working legacy URL and indexer while this candidate is evaluated. Public walkthrough transactions also need their own explicit owner authorization.
+
+The signed local rehearsal is reproducible with `pnpm --filter @market/protocol rehearse:rights` in the client. Its `packages/protocol/evidence/rights-local.json` records 47 actual Anvil transactions at chain 31337, 46 successes and one intended reverted AtomicWallet issuance that left no created right or NFT deposit. The 0.2/0.3 ETH premium sales sent 0.198/0.297 ETH to their respective sellers and 0.005 ETH total trading fees; 1 ETH exercise credited 0.95 ETH proceeds and 0.05 ETH royalty. These are local receipts with nonzero gas prices, not Sepolia transactions. The protocol's Foundry lifecycle script below is a separate simulation.
 
 ## Historical order-only addresses (superseded for new rights)
 
@@ -49,7 +98,7 @@ Historical order-only estimate by `forge script` against mainnet state (`--rpc-u
 | `Deploy.s.sol` | Market, implementation, FeeConfig, NFTSale, NFTBid, FillVerifier | 3,682,037 (45% less) |
 | `Deploy.s.sol --sig "examples()"` | PaintAction | 424,083 |
 
-Re-estimate the right-enabled script at the frozen candidate. On Sepolia, the old order-only `Market`, its implementation, `FeeConfig` and trading handlers do not implement the new right architecture. `PaintAction` has a new creation-code address after its imported `Artwork` changed. Only `FillVerifier` currently retains the old CREATE2 address; verify again against frozen bytecode.
+Re-estimate the right-enabled script at the frozen candidate. On Sepolia, the old order-only `Market`, its implementation, `FeeConfig` and trading handlers do not implement the new right architecture. `PaintAction` has a new creation-code address after its imported `Artwork` changed. At the metadata-only source FillVerifier retained its old CREATE2 address. The focused production comment cleanup changes its Solidity metadata and moves that candidate too; use the current table and verify frozen bytecode.
 
 ## Scripts
 
@@ -97,7 +146,7 @@ forge script script/Deploy.s.sol --rpc-url https://mainnet.gateway.tenderly.co
 
 ## Rehearse on a fork
 
-The current `script/rehearse.sh` covers ordinary orders only. A right-enabled real-transaction rehearsal remains a release gate.
+The current `script/rehearse.sh` covers ordinary orders only. The client signed local rehearsal records the rights lifecycle at the current source (see the verification record). A public rights walkthrough remains a separately authorized release gate.
 
 ```bash
 script/rehearse.sh
@@ -249,3 +298,9 @@ Settlement ran after both schedules ended: ask 0.001 ETH, bid 0.006 ETH per toke
 | Bid order | −0.012 | Two fills; empty and closed |
 
 The four gains sum to 0.012 ETH. Tokens 1 and 2 belong to the bidder, token 3 to the holder; both orders are closed. After cleanup: holder's approval to `NFTBid` false, all balances 0. The same flows and attacks pass against forked Sepolia state in `test/fork/SepoliaLive.t.sol` (block 12,107,304, 6 tests).
+
+## Focused improvement candidate, 2026-11-18
+
+The compiled production source is `cf7f48d8fae716740c59f882dcc2761497c2a63b`. The client pins complete protocol revision `c211808cf3dd6ed36f41e92d885e6f866a4b9436`, which includes the final historical fork-test repair and these unchanged production files. Later documentation commits do not alter its bytecode. Comments changed Solidity metadata and deterministic addresses. The prior rights candidate is superseded and remains undeployed. New Market candidate: `0x5796242872BCAA3Fb0e16a4388c70f2e80aB966c`. The full computed address/hash table is in [the verification record](verification/2026-11-18-improvements.md); the client machine-readable rights manifests carry this source pin and separate local/candidate status. Sepolia candidate startBlock remains null.
+
+Use the existing same-signer Deploy.s.sol simulation, verification and postflight relationship runbook above with this final pin. Preserve the legacy deployment and its indexer schema. The updated local signed rehearsal uses the same deployment path and records 56 transactions, both listing/right expiry cases, actual payment release and manual-config recovery after burn. Public deployment, hosted indexer setup, cutover and real-asset transactions require separate authorization.

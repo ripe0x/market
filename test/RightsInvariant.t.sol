@@ -576,7 +576,6 @@ contract RightsInvariantTest is StdInvariant, Test {
             if (state == Right.State.Active) {
                 assertEq(nft.ownerOf(e.nftId), address(e.right), "active collateral");
                 assertEq(rights.ownerOf(id), e.expectedHolder, "active token exists, even after deadline");
-                assertTrue(rights.everMinted(id));
                 assertEq(e.right.totalCredits(), 0);
             } else {
                 // ownerOf must revert for pending and every terminal state.

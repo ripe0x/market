@@ -70,7 +70,13 @@ contract SepoliaLiveTest is Test {
         assertNotEq(address(MARKET).codehash, address(candidate).codehash, "Market is legacy");
         assertNotEq(address(SALE).codehash, address(new NFTSale(candidateFees)).codehash, "NFTSale is legacy");
         assertNotEq(address(BID).codehash, address(new NFTBid(candidateFees)).codehash, "NFTBid is legacy");
-        assertEq(address(VERIFIER).codehash, address(new FillVerifier()).codehash, "FillVerifier");
+        // Pin the historical deployed runtime independently of current-source metadata.
+        assertEq(
+            address(VERIFIER).codehash,
+            0xbb49051cebc22b73e345ad3e65c789467b1a0f7e77d240ca4a3b3167749c607e,
+            "historical FillVerifier"
+        );
+        assertNotEq(address(VERIFIER).codehash, address(new FillVerifier()).codehash, "updated metadata");
         assertEq(MARKET.implementation(), 0x1c8Af1349Fa2b41903291675DCf5e9dfc2A8fB83);
     }
 

@@ -186,7 +186,7 @@ contract RightExamplesTest is Test {
 
     function test_reservedArtworkSurvivesArtTransferAndCannotBeReplaced() public {
         vm.startPrank(issuer);
-        Artwork art = new Artwork();
+        Artwork art = new Artwork(market);
         art.mint(issuer, 3);
         bytes memory config = abi.encode(ReservedPaint.Config(art, 3, (1 << 2) | (1 << 9)));
         Right right = market.createRight(paint, config, DEADLINE, issuer, bytes32(uint256(3)));
@@ -217,7 +217,7 @@ contract RightExamplesTest is Test {
 
     function testFuzz_reservedArtworkOnlyAllowsCommittedColors(uint8 color) public {
         vm.startPrank(issuer);
-        Artwork art = new Artwork();
+        Artwork art = new Artwork(market);
         art.mint(issuer, 4);
         uint256 allowed = (1 << 2) | (1 << 9);
         bytes memory config = abi.encode(ReservedPaint.Config(art, 4, allowed));
@@ -238,7 +238,7 @@ contract RightExamplesTest is Test {
 
     function test_surrenderDisablesReservedArtworkEvenForResidualBeneficiary() public {
         vm.startPrank(issuer);
-        Artwork art = new Artwork();
+        Artwork art = new Artwork(market);
         art.mint(issuer, 5);
         bytes memory config = abi.encode(ReservedPaint.Config(art, 5, 1 << 2));
         Right right = market.createRight(paint, config, DEADLINE, issuer, bytes32(uint256(5)));

@@ -50,7 +50,7 @@ There is no initialization step. The terms exist from the moment the clone's cod
 
 `orderAddress` returns `create`'s deployment address for the given values while `handler` has its current code: the CREATE2 address over the clone's creation code (OpenZeppelin `Clones.predictDeterministicAddressWithImmutableArgs`). If the handler is not deployed yet, its code hash differs and so does the address.
 
-Beyond `implementation` and the `createdAt` record, Market has no other state or functions. It never calls a handler or an order after deployment.
+Market also creates canonical `Rights` and the `Right` implementation and records genuine right accounts, as specified below. It forwards creation value to the new account. It has no administrative asset withdrawal path; forced or accidental assets at the factory are not automatically forwarded.
 
 ## Order
 
@@ -193,6 +193,14 @@ The reference covered NFT purchase handler checks issuer-only residual and `owne
 
 `NFTSale` may escrow and resell a live right token without moving its backing. Its seller owns only that listing; `Order.close` cancels the listing and permits token recovery, leaving the right untouched. A live listing's order is the token's actual holder. `NFTBid` accepts only a specific token ID for the canonical rights collection; collection-wide bids are rejected. Normal NFT sale fee and royalty rules still govern the premium, but the rights collection advertises no ERC2981 royalty. The underlying NFT's committed royalty applies once to its exercise payment, not every premium resale. Trading order deadlines are separate from the immutable right deadline and should leave an exercise window.
 
+`Rights.tokenURI(id)` returns Base64 JSON for an existing ownership token, with account identity, issuer, handler/code hash, config hash, activation terms, deadline policy, residual and effective liveness. Pending and burned tokens have no URI. At an exclusive deadline the token may still exist but the metadata reports expired and not live. It never calls the handler or underlying target.
+
 ## Toolchain
 
 Solidity 0.8.30, EVM version Prague, optimizer 200 runs with via-IR (`foundry.toml`). The core uses transient storage (EIP-1153), so it needs Cancun or later; it also compiles with Solidity 0.8.28. Clone creation and address prediction use OpenZeppelin Contracts v5.7.0 `Clones`.
+
+## Reservation authentication and token existence
+
+`Artwork` is bound immutably to a configured Market supplied to its constructor. `reserve` checks that Market's `isRight(candidate)` before reading candidate state, and accepts only pending candidates. It does not trust a candidate's self-reported registry. Active unexpired reservations survive artwork transfers and cannot be replaced. Pending or terminal reservations can be replaced. `Artwork._live` deliberately recognizes the active reservation during exercise; `Right.isLive` returns false during the exercise lock to prevent token transfer.
+
+`Rights` stores no historical mint flag or `everMinted` getter. Canonical account authentication, caller identity, permanent lifecycle transitions and ERC721 existence rules govern mint and burn. An expired account does not expose a separate boolean distinguishing expiry before issuance from expiry after issuance. Existing tokens, including expired tokens awaiting finalization, are inspected through ERC721 ownership; terminal history remains in events and the account state.
