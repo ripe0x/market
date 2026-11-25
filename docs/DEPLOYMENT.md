@@ -5,26 +5,28 @@
 | Chain | Chain ID | Status |
 | --- | --- | --- |
 | Local simulation | 31337 | Unified action candidate implemented here; **not deployed** to any public chain |
-| Ethereum Sepolia | 11155111 | **Unified action candidate deployed 2026-11-25**, blocks 12,211,383 to 12,211,389, at the addresses below (STATUS.md). The legacy order-only release of 2026-11-16 remains at its historical addresses. |
+| Ethereum Sepolia | 11155111 | **Previous unified candidate deployed 2026-11-25**, blocks 12,211,383 to 12,211,389 (STATUS.md), at the superseded addresses listed under the table below. The current candidate (D512) is not deployed yet. The legacy order-only release of 2026-11-16 remains at its historical addresses. |
 | Ethereum mainnet | 1 | **Not deployed.** Any future deployment needs a frozen candidate, rehearsal, review and the owner's explicit approval. |
 
-## Unified action candidate addresses, 2026-11-19
+## Unified action candidate addresses, 2026-11-25 (D512)
 
 Frozen production source: `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7`. Salt `keccak256("market.actions.v1")`, standard CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C`, FeeConfig admin `0xCB43078C32423F5348Cab5885911C3B5faE217F9`, fee recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72`. Computed by `forge script script/Deploy.s.sol` (simulation). **Not deployed on any public chain.** These addresses run different code from every earlier table below; never attach the new ABI to an earlier address.
 
 | Contract | Computed address | keccak of compiler runtime (immutables unfilled) |
 | --- | --- | --- |
-| Market | `0xE1a93Fae037fB7c609c17c88392d3BD24d4c9762` | `0xdafa8537f29298dc0ec2716bb12a7fb301ce36a133c4984d250d34c3740a7e4f` |
-| Order implementation (created by Market) | `0xC3052D0bc6130B6215EbC917cE2fF373ff23e96b` | `0x58bbe8625a478a3c0f9290bff9d0731631de87a7d2e62272f788fdd34fe7c6c4` |
-| Actions (created by Market) | `0x63A21B9aB7A8eea6F40cE35a5F7173426A55f575` | `0xb4197ee1d171eb2fefc005fcb276989aaec18ee8da3ef4a847f075c78f3b8634` |
+| Market | `0xf5e008cf1920968D3AFF96e880652094E94dEa17` | `0x3014680da3a61cbcc498489a9cde412f4876b101f365372d8d3f999a67c01cbe` |
+| Order implementation (created by Market) | `0x796bBB506D68a60Eb69906D955ebEa417Bb7C54e` | `0x58bbe8625a478a3c0f9290bff9d0731631de87a7d2e62272f788fdd34fe7c6c4` |
+| Actions (created by Market) | `0xB874499547D387AB67CA1b26d52f5cE22f8e700c` | `0xb4197ee1d171eb2fefc005fcb276989aaec18ee8da3ef4a847f075c78f3b8634` |
 | FeeConfig | `0xab7494a3Af234eEFC55C6de6D824A9c1ffc7B179` | `0xb22a316734ba058e071db380bef6d9da389f8ebbf771f14341eb65f7853fa3dd` |
-| ExchangeAction | `0xE2dB9EcB01D48b3332302E189eA27DE8e6d05b46` | `0xf7b68e1576d2f193dc3d489f32ad312fdd8a989fd06a9ef6e512ca299dd5001e` |
-| CoveredNFTPurchase | `0x11A989E25B23D565D332469fa0Ceb06C171ca053` | `0x5cc21b74855961c3b53daec9e25840c08e023265bd5f1fc3464750f4883a1afb` |
-| ReservedAction | `0x138294386660f95c5A61B5AF78A1c802322aB82b` | `0x30418a3b1a8372ced164a0d4cce0af66efd4173b8bcb65b15241566af411d4d5` |
-| AcquireAndExecute | `0xDFE0B731734BB27A80a229712b233c3B1431E00d` | `0xfe28e952cda3624f49b1511e632cd866034f8b7845718e340809f5f90062ee4d` |
+| ExchangeAction | `0x8D0eFf8Cc4d4B51E8c83fa23D33aDaDA0c2da64D` | `0xf7b68e1576d2f193dc3d489f32ad312fdd8a989fd06a9ef6e512ca299dd5001e` |
+| CoveredNFTPurchase | `0xcEF30179B9873e327B63E24F6715424E6552A6f6` | `0x5cc21b74855961c3b53daec9e25840c08e023265bd5f1fc3464750f4883a1afb` |
+| ReservedAction | `0x65dD4465cdd699125a4A32DEBf1e7f85bab65fF8` | `0x30418a3b1a8372ced164a0d4cce0af66efd4173b8bcb65b15241566af411d4d5` |
+| AcquireAndExecute | `0x819681722611BfE476129A93CC96FCCddE68F8a4` | `0xfe28e952cda3624f49b1511e632cd866034f8b7845718e340809f5f90062ee4d` |
 | FillVerifier | `0x255445e486aFe67a7265470cfA802f0EcFb8c07B` | `0x5c467510a657e1ae31365a293d1afc917aaa5a7e5fc5d2315c3160015d37734b` |
 
 Contracts with immutables have different onchain code hashes; the client generates those from a deployed local instance. `script/rehearse.sh` deploys the set and runs `script/ActionsLifecycle.s.sol` on a throwaway local Anvil. The earlier rights candidate and order-only tables below are historical.
+
+Superseded by D512 (deployed on Sepolia 2026-11-25 only): Market `0xE1a93Fae037fB7c609c17c88392d3BD24d4c9762`, Order implementation `0xC3052D0bc6130B6215EbC917cE2fF373ff23e96b`, Actions `0x63A21B9aB7A8eea6F40cE35a5F7173426A55f575`, ExchangeAction `0xE2dB9EcB01D48b3332302E189eA27DE8e6d05b46`, CoveredNFTPurchase `0x11A989E25B23D565D332469fa0Ceb06C171ca053`, ReservedAction `0x138294386660f95c5A61B5AF78A1c802322aB82b`, AcquireAndExecute `0xDFE0B731734BB27A80a229712b233c3B1431E00d`. FeeConfig and FillVerifier are unchanged and shared.
 
 ## Scripts
 

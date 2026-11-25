@@ -19,9 +19,18 @@ Readback from chain: runtime sizes Market 2,047, Order implementation 7,409, Act
 
 Gas finding: Sepolia now prices state creation far above mainnet. Node estimates: Market deployment 27,979,862 gas on Sepolia versus 3,986,414 on mainnet; an empty contract 214,117 versus 54,469; about 1,557 versus 200 gas per byte of deployed code. Forge simulates with local rules, so the first broadcast (tx `0x55dab960bb0c8744bd95d73d7b1ab482d3e11b475fb0da2e614426ecf3eb0d6f`, gas limit 5,735,671) reverted, created nothing and cost 0.000052 ETH; the rerun used `-g 900`. The node does not expose `eth_config`, so the fork name is unconfirmed. If mainnet adopts this pricing, each order (one new clone) costs several hundred thousand more gas and the 14,341,828-gas mainnet estimate no longer holds; re-estimate with the mainnet node before deploying.
 
-### Listing recovery at every step, 2026-11-25
+### Listing recovery at every step and D512, 2026-11-25
 
-`forge test --match-path test/ListingRecovery.t.sol`: 12 passed. The client lists in three transactions (create, deposit, activate). Stopping after any of them, the residual (the seller) recovers the NFT with `release`: in Pending with or without `cancel`, before or after the deadline, after a rejected activation, and after a deposit into an already canceled order. A Live listing past its deadline needs `finalizeExpiry` (anyone) before `release`. Strangers cannot release. The two-transaction alternative (deposit to the predicted address, then `createAndActivate`) strands the NFT permanently if the deadline passes first, because `create` rejects an expired spec and the address can never get code; it is also lost if the exact spec or salt is lost. Rejected.
+The client lists in three transactions (create, deposit, activate). Stopping after any of them, the residual (the seller) recovers the NFT with `release`: in Pending with or without `cancel`, before or after the deadline, after a rejected activation, and after a deposit into an already canceled order. A Live listing past its deadline needs `finalizeExpiry` (anyone) before `release`. Strangers cannot release.
+
+Before D512, the two-transaction alternative (deposit to the predicted address, then `createAndActivate`) stranded the NFT permanently when the deadline passed first, because `create` rejected the expired spec and the address could never get code. D512 removes that check; the test now creates the late order and releases the NFT, and a stranger's late `create` lands at a different address. Losing the exact spec or salt still strands pre-sent backing; that is a frontend responsibility.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Changed and dependent suites | `forge test --match-path "test/{Core,ListingRecovery,Exchange,Covered,Credits,Reserved,Smoke}.t.sol"`, `test/review/*`, `test/{FillVerifier,Acquire,ActionsToken}.t.sol`, `test/{BidApproval,Invariant,Gas}.t.sol --isolate` | All passed. ListingRecovery 13, Core 46. Gas snapshot: create 122 gas cheaper. |
+| New addresses | `forge script script/Deploy.s.sol` | Seven addresses changed (DEPLOYMENT.md); FeeConfig and FillVerifier unchanged. Market runtime 1,964 bytes. |
+
+Not run for D512: whole suite with `CANDIDATE_RUN=1`, mainnet fork tests, client manifests regenerated, Sepolia redeploy.
 
 Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia real-transaction lifecycle with indexer, web and a real wallet, mainnet deployment and canary.
 

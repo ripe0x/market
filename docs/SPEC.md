@@ -20,7 +20,8 @@ Market is a permissionless protocol for orders over authorized contract actions.
 Immutable, no admin, no fee. Deploys `Actions` and the `Order` implementation in its constructor.
 
 - `create(OrderSpec spec, bytes32 salt) payable`: validates and deploys a Pending order issued by `msg.sender`, forwarding `msg.value`. Sets `isOrder[order] = true` before any callback can run, then emits `Created(order, issuer, action, salt, spec)`.
-  - Reverts `ZeroResidual` for a zero residual, `BadDeadline` for a nonzero deadline at or before now, `NoActionCode` for an action without code, `DelegatedAction` for an EIP-7702 delegation designator, `Clones.CloneArgumentsTooLong` for a config too long for clone code (limit 24,430 config bytes), and the clone's `FailedDeployment` if the address is taken.
+  - Reverts `ZeroResidual` for a zero residual, `NoActionCode` for an action without code, `DelegatedAction` for an EIP-7702 delegation designator, `Clones.CloneArgumentsTooLong` for a config too long for clone code (limit 24,430 config bytes), and the clone's `FailedDeployment` if the address is taken.
+- A deadline at or before now is accepted: the order is created Pending and expired, can never activate, and its residual can `release` backing that was sent to the predicted address early. No check in `create` depends on time or chain state, so a predicted address can always receive code.
 - `createAndActivate(spec, salt) payable`: `create`, then activates that order. Backing must already be at the predicted address or be the ETH sent.
 - `orderAddress(issuer, spec, salt) view`: the address `create` would deploy for `issuer` while the action has its current runtime code. It does not check the deadline.
 - `isOrder(account)`: true only for orders this Market created.

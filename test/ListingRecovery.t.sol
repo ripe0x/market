@@ -2,13 +2,12 @@
 pragma solidity 0.8.30;
 
 import {Base} from "./utils/Base.sol";
-import {Market} from "../src/Market.sol";
 import {Admission, Order, OrderSpec, OrderState} from "../src/Order.sol";
 import {ExchangeAction} from "../actions/ExchangeAction.sol";
 
 /// The client lists in three transactions: create, deposit the NFT, activate. These tests stop the
-/// flow at every point and check the seller's NFT always comes back, and that the two-transaction
-/// alternative (deposit to the predicted address, then createAndActivate) can strand it.
+/// flow at every point and check the seller's NFT always comes back, including the two-transaction
+/// alternative (deposit to the predicted address, then createAndActivate) when it lands late.
 contract ListingRecoveryTest is Base {
     uint256 constant ID = 7;
     uint64 constant DEADLINE = 2_000_000_000;
@@ -146,9 +145,9 @@ contract ListingRecoveryTest is Base {
     // ---- the two-transaction alternative ----
 
     /// Deposit first to the predicted address, then createAndActivate. If the deadline passes
-    /// before the second transaction lands, `create` rejects the spec, the address can never get
-    /// code, and the NFT has no way out.
-    function test_depositFirst_pastDeadline_strandsNft() public {
+    /// before the second transaction lands, activation fails, but `create` still deploys the
+    /// order at the predicted address and the seller releases the NFT.
+    function test_depositFirst_pastDeadline_recoverable() public {
         vm.warp(1_900_000_000);
         nft.mint(seller, ID);
         OrderSpec memory spec = _spec(DEADLINE, 10_000);
@@ -159,14 +158,31 @@ contract ListingRecoveryTest is Base {
 
         vm.warp(DEADLINE);
         vm.prank(seller);
-        vm.expectRevert(Market.BadDeadline.selector);
+        vm.expectRevert(Order.DeadlinePassed.selector);
         market.createAndActivate(spec, s);
-        vm.prank(seller);
-        vm.expectRevert(Market.BadDeadline.selector);
-        market.create(spec, s);
 
-        assertEq(nft.ownerOf(ID), predicted, "NFT stuck at an address with no code");
-        assertEq(predicted.code.length, 0);
+        vm.prank(seller);
+        Order o = market.create(spec, s);
+        assertEq(address(o), predicted);
+        assertFalse(o.isLive());
+        _recover(o);
+    }
+
+    /// Anyone else creating that late order cannot take the NFT: the issuer is part of the address,
+    /// so a stranger's create lands elsewhere.
+    function test_depositFirst_strangerCreateMisses() public {
+        vm.warp(1_900_000_000);
+        nft.mint(seller, ID);
+        OrderSpec memory spec = _spec(DEADLINE, 10_000);
+        bytes32 s = bytes32(uint256(999));
+        address predicted = market.orderAddress(seller, spec, s);
+        vm.prank(seller);
+        nft.transferFrom(seller, predicted, ID);
+        vm.warp(DEADLINE + 1);
+        vm.prank(attacker);
+        Order o = market.create(spec, s);
+        assertTrue(address(o) != predicted);
+        assertEq(nft.ownerOf(ID), predicted);
     }
 
     /// Same deposit with the spec in hand and the deadline still ahead: recoverable by creating

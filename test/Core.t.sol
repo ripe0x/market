@@ -257,18 +257,24 @@ contract CoreTest is ProbeBase {
         market.create(spec, SALT);
     }
 
-    function test_rejectDeadlineNow() public {
-        OrderSpec memory spec = _probeSpec(Admission.Public, uint64(block.timestamp), issuer);
-        vm.prank(issuer);
-        vm.expectRevert(Market.BadDeadline.selector);
-        market.create(spec, SALT);
-    }
-
-    function test_rejectDeadlinePast() public {
-        OrderSpec memory spec = _probeSpec(Admission.Public, uint64(block.timestamp - 1), issuer);
-        vm.prank(issuer);
-        vm.expectRevert(Market.BadDeadline.selector);
-        market.create(spec, SALT);
+    /// A deadline at or before now is accepted so pre-sent backing stays recoverable; the order
+    /// is born expired and can never go live.
+    function test_createPastDeadline_neverLive() public {
+        uint64[2] memory deadlines = [uint64(block.timestamp), uint64(block.timestamp - 1)];
+        for (uint256 i; i < 2; ++i) {
+            OrderSpec memory spec = _probeSpec(Admission.Public, deadlines[i], issuer);
+            vm.prank(issuer);
+            vm.expectRevert(Order.DeadlinePassed.selector);
+            market.createAndActivate(spec, bytes32(i));
+            vm.prank(issuer);
+            Order o = market.create(spec, bytes32(i));
+            assertEq(uint8(o.state()), uint8(OrderState.Pending));
+            assertTrue(o.isExpired());
+            assertFalse(o.isLive());
+            vm.prank(issuer);
+            vm.expectRevert(Order.DeadlinePassed.selector);
+            o.activate();
+        }
     }
 
     function test_rejectCodelessAction() public {
