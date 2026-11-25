@@ -5,7 +5,7 @@
 | Chain | Chain ID | Status |
 | --- | --- | --- |
 | Local simulation | 31337 | Unified action candidate implemented here; **not deployed** to any public chain |
-| Ethereum Sepolia | 11155111 | **Previous unified candidate deployed 2026-11-25**, blocks 12,211,383 to 12,211,389 (STATUS.md), at the superseded addresses listed under the table below. The current candidate (D512) is not deployed yet. The legacy order-only release of 2026-11-16 remains at its historical addresses. |
+| Ethereum Sepolia | 11155111 | **Current candidate (D512) deployed 2026-11-25**, blocks 12,211,840 to 12,211,844, at the addresses below; FeeConfig and FillVerifier reused from the earlier deployment (STATUS.md). The superseded pre-D512 contracts listed under the table remain live on Sepolia, as does the legacy order-only release of 2026-11-16. |
 | Ethereum mainnet | 1 | **Not deployed.** Any future deployment needs a frozen candidate, rehearsal, review and the owner's explicit approval. |
 
 ## Unified action candidate addresses, 2026-11-25 (D512)
@@ -26,7 +26,7 @@ Frozen production source: `45492b9aa6f7bdfe232a5f174fe5f76d59d414c7`. Salt `kecc
 
 Contracts with immutables have different onchain code hashes; the client generates those from a deployed local instance. `script/rehearse.sh` deploys the set and runs `script/ActionsLifecycle.s.sol` on a throwaway local Anvil. The earlier rights candidate and order-only tables below are historical.
 
-Superseded by D512 (deployed on Sepolia 2026-11-25 only): Market `0xE1a93Fae037fB7c609c17c88392d3BD24d4c9762`, Order implementation `0xC3052D0bc6130B6215EbC917cE2fF373ff23e96b`, Actions `0x63A21B9aB7A8eea6F40cE35a5F7173426A55f575`, ExchangeAction `0xE2dB9EcB01D48b3332302E189eA27DE8e6d05b46`, CoveredNFTPurchase `0x11A989E25B23D565D332469fa0Ceb06C171ca053`, ReservedAction `0x138294386660f95c5A61B5AF78A1c802322aB82b`, AcquireAndExecute `0xDFE0B731734BB27A80a229712b233c3B1431E00d`. FeeConfig and FillVerifier are unchanged and shared.
+Superseded by D512 (deployed on Sepolia 2026-11-25 at blocks 12,211,383 to 12,211,389, still live there): Market `0xE1a93Fae037fB7c609c17c88392d3BD24d4c9762`, Order implementation `0xC3052D0bc6130B6215EbC917cE2fF373ff23e96b`, Actions `0x63A21B9aB7A8eea6F40cE35a5F7173426A55f575`, ExchangeAction `0xE2dB9EcB01D48b3332302E189eA27DE8e6d05b46`, CoveredNFTPurchase `0x11A989E25B23D565D332469fa0Ceb06C171ca053`, ReservedAction `0x138294386660f95c5A61B5AF78A1c802322aB82b`, AcquireAndExecute `0xDFE0B731734BB27A80a229712b233c3B1431E00d`. FeeConfig and FillVerifier are unchanged and shared.
 
 ## Scripts
 

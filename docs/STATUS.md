@@ -19,6 +19,12 @@ Readback from chain: runtime sizes Market 2,047, Order implementation 7,409, Act
 
 Gas finding: Sepolia now prices state creation far above mainnet. Node estimates: Market deployment 27,979,862 gas on Sepolia versus 3,986,414 on mainnet; an empty contract 214,117 versus 54,469; about 1,557 versus 200 gas per byte of deployed code. Forge simulates with local rules, so the first broadcast (tx `0x55dab960bb0c8744bd95d73d7b1ab482d3e11b475fb0da2e614426ecf3eb0d6f`, gas limit 5,735,671) reverted, created nothing and cost 0.000052 ETH; the rerun used `-g 900`. The node does not expose `eth_config`, so the fork name is unconfirmed. If mainnet adopts this pricing, each order (one new clone) costs several hundred thousand more gas and the 14,341,828-gas mainnet estimate no longer holds; re-estimate with the mainnet node before deploying.
 
+### Sepolia redeploy with D512, 2026-11-25
+
+Owner ran `Deploy.run()` from `main` at `c0c129c` with `--account ripe0x -g 900`. Five transactions, all status 1, blocks 12,211,840 to 12,211,844, 65,526,354 gas, 0.00328 Sepolia ETH; Market tx `0x8a2112817dce080eeae6f85359afd3e78ec20fd354fc227d0f66c7ee081e2f1c`. Market creates the Order implementation and Actions; FeeConfig and FillVerifier were already present and reused. Readback: runtime sizes Market 1,964, Order 7,409, Actions 7,803, ExchangeAction 10,155, CoveredNFTPurchase 5,131, ReservedAction 4,329, AcquireAndExecute 4,468 bytes; every relationship getter matches the address table; all nine code hashes match the client manifest. The client indexer (schema `market_actions_d512`) reports ready on the new Market.
+
+The pre-D512 Sepolia contracts stay live. One owner listing created on them during testing (`0x5e67454b987c0Ba4b191Fc0d43C8a8E6Cd0DE2d2`, Shapes #104) is not visible to the current client.
+
 ### Listing recovery at every step and D512, 2026-11-25
 
 The client lists in three transactions (create, deposit, activate). Stopping after any of them, the residual (the seller) recovers the NFT with `release`: in Pending with or without `cancel`, before or after the deadline, after a rejected activation, and after a deposit into an already canceled order. A Live listing past its deadline needs `finalizeExpiry` (anyone) before `release`. Strangers cannot release.
