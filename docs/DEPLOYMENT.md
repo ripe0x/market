@@ -5,7 +5,7 @@
 | Chain | Chain ID | Status |
 | --- | --- | --- |
 | Local simulation | 31337 | Unified action candidate implemented here; **not deployed** to any public chain |
-| Ethereum Sepolia | 11155111 | **Legacy order-only release**, deployed and verified 2026-11-16. Its `Market`, `FeeConfig`, `NFTSale`, `NFTBid` and `PaintAction` addresses below do not support native transferable rights. Historical records remain below. |
+| Ethereum Sepolia | 11155111 | **Unified action candidate deployed 2026-11-25**, blocks 12,211,383 to 12,211,389, at the addresses below (STATUS.md). The legacy order-only release of 2026-11-16 remains at its historical addresses. |
 | Ethereum mainnet | 1 | **Not deployed.** Any future deployment needs a frozen candidate, rehearsal, review and the owner's explicit approval. |
 
 ## Unified action candidate addresses, 2026-11-19
@@ -53,7 +53,7 @@ Deploy only from an up-to-date `main`, with the Foundry keystore `ripe0x` (`--ac
 | Owner-approved outcome numbers and one-screen economic scorecard | Draft in [RELEASE.md](RELEASE.md); needs owner approval |
 | Independent external audit, findings resolved | Not done |
 | Mainnet-fork rehearsal of `Deploy.run()` and lifecycle; read-only mainnet dry run | Done 2026-11-25, same addresses, 14,341,828 gas (STATUS.md) |
-| Sepolia deployment with `ripe0x`, postflight readback of every address and relationship, real-transaction lifecycle, indexer and web against it, real wallet extension | Not done; needs owner approval and signatures |
+| Sepolia deployment with `ripe0x`, postflight readback of every address and relationship, real-transaction lifecycle, indexer and web against it, real wallet extension | Deployed and read back 2026-11-25 (start block 12,211,383; deploy with `-g 900`, see STATUS.md). Lifecycle, indexer, web and wallet not done |
 | Mainnet deployment, readback, small-value canary lifecycle compared with the scorecard | Not done; needs owner approval |
 
 Postflight for each deployment: code exists at every computed address; `Market.implementation()`, `Market.actions()`, `Actions.market()`, the Order implementation's `market()` and `actions()`, each action's `market()`, `ExchangeAction.fees()` and `actions()`, `AcquireAndExecute.market()`, `actions()`, `exchange()` and `covered()`; `FeeConfig.admin()`, `recipient()`, `feeBps()`; runtime code hashes match the client manifest. Record transaction hashes, blocks and gas here.

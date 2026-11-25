@@ -11,7 +11,15 @@ Protocol PRs #17 and #18 merged to `main` (merge commit `c671b3c`); client PRs #
 
 Environment finding: the first fork rehearsal failed `exact spend`. The lifecycle script's actors were `vm.addr(1..9)`, whose private keys are public; on mainnet all nine carry an EIP-7702 delegation (`0xef0100` + `8a67b5…`) that forwards received ETH, so the correct 1 ETH refund was swept. The script now derives actors from unheld keys and requires each to have no code. No fork test uses small-key actors. This is the documented behavior that an ETH transfer calls the receiver's code, not a protocol defect.
 
-Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia deployment with real transactions, mainnet deployment and canary.
+### Sepolia deployment, 2026-11-25
+
+Owner ran `Deploy.run()` from `main` with `--account ripe0x` (signer `0xCB43078C32423F5348Cab5885911C3B5faE217F9`). All nine addresses match the candidate table. Seven transactions, all status 1, blocks 12,211,383 to 12,211,389, 69,373,499 gas, 0.0386 Sepolia ETH. Market tx `0x68fd0350a526476ec45453f7daf29d9ff375c943096ae2a149656538ff1fa0e6` (27,540,377 gas). Not submitted to Etherscan or Sourcify.
+
+Readback from chain: runtime sizes Market 2,047, Order implementation 7,409, Actions 7,803, FeeConfig 924, ExchangeAction 10,155, CoveredNFTPurchase 5,131, ReservedAction 4,329, AcquireAndExecute 4,468, FillVerifier 1,058 bytes. `Market.implementation()` and `actions()`, `Actions.market()`, the implementation's `market()` and `actions()`, each action's `market()`, `ExchangeAction.fees()` and `actions()`, and `AcquireAndExecute.market()`, `actions()`, `exchange()`, `covered()` all point at the table addresses. `FeeConfig` admin `0xCB43…17F9`, recipient `0xD4ba7cA95f3983514DDa317C4428CDb8F59c7e72`, `feeBps` 100.
+
+Gas finding: Sepolia now prices state creation far above mainnet. Node estimates: Market deployment 27,979,862 gas on Sepolia versus 3,986,414 on mainnet; an empty contract 214,117 versus 54,469; about 1,557 versus 200 gas per byte of deployed code. Forge simulates with local rules, so the first broadcast (tx `0x55dab960bb0c8744bd95d73d7b1ab482d3e11b475fb0da2e614426ecf3eb0d6f`, gas limit 5,735,671) reverted, created nothing and cost 0.000052 ETH; the rerun used `-g 900`. The node does not expose `eth_config`, so the fork name is unconfirmed. If mainnet adopts this pricing, each order (one new clone) costs several hundred thousand more gas and the 14,341,828-gas mainnet estimate no longer holds; re-estimate with the mainnet node before deploying.
+
+Still not done: owner approval of [RELEASE.md](RELEASE.md) outcomes, independent external audit, Sepolia real-transaction lifecycle with indexer, web and a real wallet, mainnet deployment and canary.
 
 ## Unified action candidate, 2026-11-19
 

@@ -40,4 +40,5 @@ Each needs the owner's reason before launch:
 - No launch-scale amounts measured (for example a 100 ETH sale or a 1,000-item collection bid).
 - Sepolia and mainnet columns need real transactions.
 - No independent external audit.
+- Sepolia prices contract creation about 7 times mainnet (STATUS.md). If mainnet adopts it, order creation cost rises; no outcome number covers gas cost yet.
 - The core has no caps or pause; a canary limits only the owner's own usage.
